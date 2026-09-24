@@ -21,12 +21,17 @@ async function seedDemoAccounts() {
   console.log("Demo accounts seeded: customer@booknest.com / admin@booknest.com");
 }
 
-async function seed() {
-  const seedPath = path.join(__dirname, "seed.sql");
-  const seedSql = fs.readFileSync(seedPath, "utf-8");
+// Run in order: base data, extra books, then cover/price fixes.
+const SEED_FILES = ["seed.sql", "add_more_books.sql", "fix_covers.sql", "fix_prices.sql"];
 
+async function seed() {
   console.log("Seeding database...");
-  await pool.query(seedSql);
+  for (const file of SEED_FILES) {
+    const filePath = path.join(__dirname, file);
+    const sql = fs.readFileSync(filePath, "utf-8");
+    await pool.query(sql);
+    console.log(`${file} applied.`);
+  }
   await seedDemoAccounts();
   console.log("Seed data inserted successfully.");
 

@@ -5,7 +5,7 @@ interface Book {
   id: string;
   title: string;
   author: string;
-  availableQuantity: number;
+  quantity: number;
 }
 
 export default function AdminInventory() {
@@ -18,7 +18,7 @@ export default function AdminInventory() {
     const res = await api.get<{ books: Book[] }>("/books?limit=50&sort=title");
     setBooks(res.books);
     const initialDrafts: Record<string, string> = {};
-    res.books.forEach((b) => (initialDrafts[b.id] = String(b.availableQuantity)));
+    res.books.forEach((b) => (initialDrafts[b.id] = String(b.quantity)));
     setDrafts(initialDrafts);
   }
 
@@ -27,10 +27,15 @@ export default function AdminInventory() {
   }, []);
 
   async function saveQuantity(bookId: string) {
+    const nextQuantity = Number(drafts[bookId]);
+    if (!Number.isInteger(nextQuantity) || nextQuantity < 0) {
+      setError("Stock quantity must be a non-negative whole number.");
+      return;
+    }
     setError(null);
     setSavingId(bookId);
     try {
-      await api.patch(`/books/${bookId}/inventory`, { quantity: Number(drafts[bookId]) });
+      await api.patch(`/books/${bookId}/inventory`, { quantity: nextQuantity });
       await load();
     } catch (err: any) {
       setError(err.message);
@@ -49,7 +54,7 @@ export default function AdminInventory() {
           <tr>
             <th>Title</th>
             <th>Author</th>
-            <th>Quantity</th>
+            <th>Total Stock</th>
             <th></th>
           </tr>
         </thead>

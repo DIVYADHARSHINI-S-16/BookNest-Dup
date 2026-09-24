@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
+import { isValidUuid } from "../utils/validation";
 
 /**
  * GET /api/books/:bookId/reviews
@@ -9,6 +10,7 @@ import { AppError } from "../middleware/errorHandler";
 export async function listReviews(req: Request, res: Response, next: NextFunction) {
   try {
     const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
 
     const bookExists = await pool.query("SELECT id FROM books WHERE id = $1", [bookId]);
     if (bookExists.rows.length === 0) throw new AppError("Book not found.", 404);
@@ -52,6 +54,7 @@ export async function listReviews(req: Request, res: Response, next: NextFunctio
 export async function addReview(req: Request, res: Response, next: NextFunction) {
   try {
     const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
     const { rating, comment } = req.body;
 
     const ratingNum = Number(rating);
@@ -121,6 +124,7 @@ export async function listAllReviewsForAdmin(_req: Request, res: Response, next:
 export async function deleteReviewAsAdmin(req: Request, res: Response, next: NextFunction) {
   try {
     const { reviewId } = req.params;
+    if (!isValidUuid(reviewId)) throw new AppError("Invalid review ID.", 400);
     const result = await pool.query("DELETE FROM reviews WHERE id = $1 RETURNING id", [reviewId]);
     if (result.rows.length === 0) throw new AppError("Review not found.", 404);
     res.status(204).send();

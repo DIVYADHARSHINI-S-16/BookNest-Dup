@@ -61,19 +61,41 @@ export default function AdminBookForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const title = form.title.trim();
+    const author = form.author.trim();
+    const price = Number(form.price);
+    const quantity = Number(form.quantity);
+
+    if (!title || !author) {
+      setError("Title and author are required.");
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      setError("Price must be a valid non-negative number.");
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity < 0) {
+      setError("Stock quantity must be a non-negative whole number.");
+      return;
+    }
+    if (!form.categoryId) {
+      setError("Please select a category.");
+      return;
+    }
+
     setError(null);
     setSaving(true);
     try {
       const payload = {
-        title: form.title,
-        author: form.author,
-        description: form.description || undefined,
-        isbn: form.isbn || undefined,
-        price: Number(form.price),
-        coverImageUrl: form.coverImageUrl,
+        title,
+        author,
+        description: form.description.trim() || undefined,
+        isbn: form.isbn.trim() || undefined,
+        price,
+        coverImageUrl: form.coverImageUrl.trim(),
         categoryId: Number(form.categoryId),
         isSecondHand: form.isSecondHand,
-        quantity: Number(form.quantity),
+        quantity,
       };
 
       if (isEditing) {

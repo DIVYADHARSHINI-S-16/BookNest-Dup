@@ -16,10 +16,20 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    if (!trimmedPassword) {
+      setError("Password is required.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
-      const user = await login(email, password);
+      const user = await login(trimmedEmail, password);
       showToast(`Welcome back, ${user.name.split(" ")[0]}.`, "success");
       const dest = user.role === "admin" ? "/admin" : (location.state?.from as any)?.pathname || "/";
       navigate(dest, { replace: true });

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
+import { isValidUuid } from "../utils/validation";
 import { getOrCreateCartId } from "./cartController";
 
 const ORDER_STATUSES = ["PLACED", "CONFIRMED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED"];
@@ -179,6 +180,7 @@ async function fetchOrderWithItems(orderId: string) {
 export async function getOrderById(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
+    if (!isValidUuid(id)) throw new AppError("Invalid order ID.", 400);
     const order = await fetchOrderWithItems(id);
     if (!order) throw new AppError("Order not found.", 404);
 

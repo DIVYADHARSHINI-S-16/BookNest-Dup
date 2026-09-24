@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
+import { isValidUuid } from "../utils/validation";
 
 async function getOrCreateCartId(userId: string): Promise<string> {
   const existing = await pool.query("SELECT id FROM cart WHERE user_id = $1", [userId]);
@@ -78,6 +79,7 @@ export async function addToCart(req: Request, res: Response, next: NextFunction)
     const qty = Number(quantity);
 
     if (!bookId) throw new AppError("bookId is required.", 422);
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
     if (!Number.isInteger(qty) || qty < 1) {
       throw new AppError("quantity must be a positive integer.", 422);
     }
@@ -142,6 +144,7 @@ export async function updateCartItemQuantity(req: Request, res: Response, next: 
   const client = await pool.connect();
   try {
     const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
     const { action } = req.body;
 
     if (action !== "increase" && action !== "decrease") {
@@ -207,6 +210,7 @@ export async function removeFromCart(req: Request, res: Response, next: NextFunc
   const client = await pool.connect();
   try {
     const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
 
     await client.query("BEGIN");
 

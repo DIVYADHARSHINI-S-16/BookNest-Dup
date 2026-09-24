@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
+import { invalidateBookCaches } from "../utils/cache";
+import { isValidUuid } from "../utils/validation";
 
 const CONDITION_GRADES = ["LIKE_NEW", "VERY_GOOD", "GOOD", "ACCEPTABLE"];
 
@@ -26,6 +28,7 @@ function formatCondition(row: any) {
 export async function getSecondHandCondition(req: Request, res: Response, next: NextFunction) {
   try {
     const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
 
     const bookResult = await pool.query(
       "SELECT id, is_second_hand FROM books WHERE id = $1",
@@ -60,6 +63,7 @@ export async function getSecondHandCondition(req: Request, res: Response, next: 
 export async function upsertSecondHandCondition(req: Request, res: Response, next: NextFunction) {
   try {
     const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
     const {
       conditionGrade,
       conditionNotes,
@@ -135,6 +139,7 @@ export async function upsertSecondHandCondition(req: Request, res: Response, nex
       }
 
       await client.query("COMMIT");
+      await invalidateBookCaches(bookId);
       res.status(200).json({ condition: formatCondition(result.rows[0]) });
     } catch (err) {
       await client.query("ROLLBACK");
@@ -154,6 +159,7 @@ export async function upsertSecondHandCondition(req: Request, res: Response, nex
 export async function deleteSecondHandCondition(req: Request, res: Response, next: NextFunction) {
   try {
     const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
 
     const client = await pool.connect();
     try {
@@ -161,6 +167,7 @@ export async function deleteSecondHandCondition(req: Request, res: Response, nex
       await client.query("DELETE FROM second_hand_conditions WHERE book_id = $1", [bookId]);
       await client.query("UPDATE books SET is_second_hand = false WHERE id = $1", [bookId]);
       await client.query("COMMIT");
+      await invalidateBookCaches(bookId);
       res.status(204).send();
     } catch (err) {
       await client.query("ROLLBACK");

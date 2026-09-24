@@ -66,9 +66,9 @@ export default function BooksPage() {
 
   return (
     <div>
-          <h1 className="page-title">{secondHand ? "Second-Hand Books" : "Browse Books"}</h1>
+          <h1 className="page-title">{secondHand === "true" ? "Second-Hand Books" : "Browse Books"}</h1>
       <p className="page-subtitle">
-        {secondHand
+        {secondHand === "true"
           ? "Pre-loved copies, condition disclosed upfront."
           : "Search, filter, and sort the full catalog."}
       </p>
@@ -76,7 +76,7 @@ export default function BooksPage() {
       <div className="filters-bar card">
         <input
           type="search"
-          placeholder="Search title, author, or description…"
+          placeholder="Search title, author, ISBN..."
           defaultValue={q}
           onKeyDown={(e) => {
             if (e.key === "Enter") updateParam("q", (e.target as HTMLInputElement).value);
@@ -99,6 +99,12 @@ export default function BooksPage() {
           <option value="out_of_stock">Out of stock</option>
         </select>
 
+        <select value={secondHand} onChange={(e) => updateParam("secondHand", e.target.value)}>
+          <option value="">New and second-hand</option>
+          <option value="false">New only</option>
+          <option value="true">Second-hand only</option>
+        </select>
+
         <input
           type="number"
           placeholder="Min ₹"
@@ -119,6 +125,7 @@ export default function BooksPage() {
           <option value="title">Title A–Z</option>
           <option value="price_asc">Price: low to high</option>
           <option value="price_desc">Price: high to low</option>
+          <option value="rating">Top rated</option>
         </select>
       </div>
 

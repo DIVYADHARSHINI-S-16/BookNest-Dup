@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS second_hand_conditions (
     id              SERIAL PRIMARY KEY,
     book_id         UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     condition_grade VARCHAR(20) NOT NULL
-                        CHECK (condition_grade IN ('like_new', 'good', 'fair', 'worn')),
+                        CHECK (condition_grade IN ('LIKE_NEW', 'VERY_GOOD', 'GOOD', 'ACCEPTABLE')),
     condition_notes TEXT,
     price_override  NUMERIC(10, 2) CHECK (price_override >= 0),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -102,8 +102,8 @@ CREATE INDEX IF NOT EXISTS idx_cart_items_cart_id ON cart_items(cart_id);
 CREATE TABLE IF NOT EXISTS orders (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
-                        CHECK (status IN ('pending', 'paid', 'shipped', 'delivered', 'cancelled')),
+    status          VARCHAR(20) NOT NULL DEFAULT 'PLACED'
+                        CHECK (status IN ('PLACED', 'CONFIRMED', 'PACKED', 'SHIPPED', 'DELIVERED', 'CANCELLED')),
     subtotal        NUMERIC(10, 2) NOT NULL CHECK (subtotal >= 0),
     total           NUMERIC(10, 2) NOT NULL CHECK (total >= 0),
     shipping_address TEXT,

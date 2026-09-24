@@ -22,6 +22,7 @@ export default function Navbar() {
 
         <nav className="navbar-links">
           <Link to="/books">Books</Link>
+          <Link to="/help-me-choose">Help Me Choose</Link>
           <Link to="/books?secondHand=true">Second-Hand</Link>
           {user?.role === "admin" && <Link to="/admin">Admin</Link>}
         </nav>

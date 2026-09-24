@@ -38,12 +38,18 @@ export default function AdminCategories() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedName = name.trim();
+    const trimmedDescription = description.trim();
+    if (!trimmedName || trimmedName.length < 2) {
+      setError("Category name must be at least 2 characters.");
+      return;
+    }
     setError(null);
     try {
       if (editingId) {
-        await api.put(`/categories/${editingId}`, { name, description });
+        await api.put(`/categories/${editingId}`, { name: trimmedName, description: trimmedDescription });
       } else {
-        await api.post("/categories", { name, description });
+        await api.post("/categories", { name: trimmedName, description: trimmedDescription });
       }
       resetForm();
       await load();

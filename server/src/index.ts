@@ -47,14 +47,20 @@ app.use(errorHandler);
 async function start() {
   try {
     await testConnection();
-    await connectRedis();
-    app.listen(PORT, () => {
-      console.log(`BookNest server running on http://localhost:${PORT}`);
-    });
   } catch (err) {
-    console.error("Failed to start server:", err);
+    console.error("Failed to start server (PostgreSQL required):", err);
     process.exit(1);
   }
+
+  try {
+    await connectRedis();
+  } catch (err) {
+    console.error("Redis unavailable, continuing without cache:", (err as Error).message);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`BookNest server running on http://localhost:${PORT}`);
+  });
 }
 
 start();

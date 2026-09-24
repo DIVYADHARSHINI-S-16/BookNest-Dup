@@ -17,10 +17,24 @@ export default function RegisterPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    if (trimmedName.length < 2) {
+      setError("Name must be at least 2 characters.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError("A valid email is required.");
+      return;
+    }
+    if (password.length < 6 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      setError("Password must be at least 6 characters and include letters and numbers.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
-      await api.post("/auth/register", { name, email, password });
+      await api.post("/auth/register", { name: trimmedName, email: trimmedEmail, password });
       // Registration signs in server-side (sets the cookie); re-run login
       // flow client-side so AuthContext picks up the new session.
       await login(email, password);

@@ -5,6 +5,18 @@ export interface ValidationResult {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+export function isValidUuid(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim()
+  );
+}
+
+export function isValidNonNegativeInteger(value: unknown): boolean {
+  const num = Number(value);
+  return Number.isInteger(num) && num >= 0;
+}
+
 export function validateRegisterInput(body: any): ValidationResult {
   const errors: string[] = [];
   const { name, email, password } = body || {};
@@ -12,7 +24,7 @@ export function validateRegisterInput(body: any): ValidationResult {
   if (!name || typeof name !== "string" || name.trim().length < 2) {
     errors.push("Name must be at least 2 characters.");
   }
-  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email)) {
+  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email.trim())) {
     errors.push("A valid email is required.");
   }
   if (!password || typeof password !== "string" || password.length < 6) {
@@ -32,10 +44,10 @@ export function validateLoginInput(body: any): ValidationResult {
   const errors: string[] = [];
   const { email, password } = body || {};
 
-  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email)) {
+  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email.trim())) {
     errors.push("A valid email is required.");
   }
-  if (!password || typeof password !== "string") {
+  if (!password || typeof password !== "string" || !password.trim()) {
     errors.push("Password is required.");
   }
 

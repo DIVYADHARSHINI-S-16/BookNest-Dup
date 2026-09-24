@@ -139,7 +139,7 @@ export default function BookDetailPage() {
 
           {book.reviewCount > 0 && <StarRating rating={book.averageRating} count={book.reviewCount} />}
 
-          <p className="book-detail-price">₹{book.price.toFixed(2)}</p>
+          <p className="book-detail-price">₹{(book.secondHandCondition?.priceOverride ?? book.price).toFixed(2)}</p>
 
           {book.inStock ? (
             <span className="badge badge-success">In stock ({book.availableQuantity} left)</span>
