@@ -10,5 +10,5 @@ UPDATE books SET cover_image_url = 'https://covers.openlibrary.org/b/isbn/978161
 UPDATE books SET cover_image_url = 'https://covers.openlibrary.org/b/isbn/9780307588364-L.jpg' WHERE title = 'Gone Girl';
 UPDATE books SET cover_image_url = 'https://covers.openlibrary.org/b/isbn/9780141439518-L.jpg' WHERE title = 'Pride and Prejudice';
 UPDATE books SET cover_image_url = 'https://covers.openlibrary.org/b/isbn/9781524763138-L.jpg' WHERE title = 'Becoming';
-UPDATE books SET cover_image_url = 'https://covers.openlibrary.org/b/isbn/9780143124542-L.jpg' WHERE title = 'Me Before You';
+UPDATE books SET cover_image_url = 'https://dynamic.indigoimages.ca/v1/books/books/0143124544/1.jpg' WHERE title = 'Me Before You';
 UPDATE books SET cover_image_url = 'https://covers.openlibrary.org/b/isbn/9780547928227-L.jpg' WHERE title = 'The Hobbit';
