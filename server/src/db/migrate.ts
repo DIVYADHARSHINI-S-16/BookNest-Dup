@@ -10,6 +10,7 @@ const MIGRATION_FILES = [
   "migrations_phase1d.sql",
   "migrations_phase1e.sql",
   "migrations_phase1f.sql",
+  "migrations_phase2a.sql",
 ];
 
 async function migrate() {

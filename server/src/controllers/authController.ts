@@ -28,8 +28,9 @@ export async function register(req: Request, res: Response, next: NextFunction) 
     const { valid, errors } = validateRegisterInput(req.body);
     if (!valid) throw new AppError(errors.join(" "), 422);
 
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
     const normalizedEmail = String(email).trim().toLowerCase();
+    const requestedRole = role === "store_owner" ? "store_owner" : "customer";
 
     const existing = await pool.query("SELECT id FROM users WHERE email = $1", [
       normalizedEmail,
@@ -42,9 +43,9 @@ export async function register(req: Request, res: Response, next: NextFunction) 
 
     const result = await pool.query(
       `INSERT INTO users (name, email, password_hash, role)
-       VALUES ($1, $2, $3, 'customer')
+       VALUES ($1, $2, $3, $4)
        RETURNING id, name, email, role`,
-      [name.trim(), normalizedEmail, passwordHash]
+      [name.trim(), normalizedEmail, passwordHash, requestedRole]
     );
 
     const user = result.rows[0];

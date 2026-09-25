@@ -12,6 +12,7 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"customer" | "store_owner">("customer");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -34,12 +35,17 @@ export default function RegisterPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await api.post("/auth/register", { name: trimmedName, email: trimmedEmail, password });
+      await api.post("/auth/register", {
+        name: trimmedName,
+        email: trimmedEmail,
+        password,
+        role,
+      });
       // Registration signs in server-side (sets the cookie); re-run login
       // flow client-side so AuthContext picks up the new session.
       await login(email, password);
       showToast("Account created. Welcome to BookNest!", "success");
-      navigate("/", { replace: true });
+      navigate(role === "store_owner" ? "/store-owner" : "/", { replace: true });
     } catch (err: any) {
       setError(err.message || "Registration failed.");
     } finally {
@@ -68,6 +74,13 @@ export default function RegisterPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
+        </div>
+        <div className="form-field">
+          <label htmlFor="role">Account type</label>
+          <select id="role" value={role} onChange={(e) => setRole(e.target.value as "customer" | "store_owner")}>
+            <option value="customer">Customer</option>
+            <option value="store_owner">Store Owner</option>
+          </select>
         </div>
         <div className="form-field">
           <label htmlFor="password">Password</label>

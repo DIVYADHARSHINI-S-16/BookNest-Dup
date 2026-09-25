@@ -13,6 +13,7 @@ import categoryRoutes from "./routes/categoryRoutes";
 import cartRoutes from "./routes/cartRoutes";
 import orderRoutes from "./routes/orderRoutes";
 import adminRoutes from "./routes/adminRoutes";
+import storeRoutes from "./routes/storeRoutes";
 
 dotenv.config();
 
@@ -40,6 +41,7 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/stores", storeRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

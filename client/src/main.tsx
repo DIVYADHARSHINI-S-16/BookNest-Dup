@@ -9,6 +9,7 @@ import { CartProvider } from "./context/CartContext";
 import { ToastProvider } from "./context/ToastContext";
 import { RequireAuth } from "./routes/RequireAuth";
 import { RequireAdmin } from "./routes/RequireAdmin";
+import { RequireStoreOwner } from "./routes/RequireStoreOwner";
 
 import StorefrontLayout from "./components/StorefrontLayout";
 import AdminLayout from "./components/admin/AdminLayout";
@@ -38,6 +39,7 @@ import AdminOrders from "./pages/admin/AdminOrders";
 import AdminOrderDetail from "./pages/admin/AdminOrderDetail";
 import AdminReviews from "./pages/admin/AdminReviews";
 import AdminSecondHand from "./pages/admin/AdminSecondHand";
+import StoreOwnerPage from "./pages/StoreOwnerPage";
 
 function App() {
   return (
@@ -64,6 +66,10 @@ function App() {
                   <Route path="/orders" element={<OrdersPage />} />
                   <Route path="/orders/:id" element={<OrderDetailPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
+                </Route>
+
+                <Route element={<RequireStoreOwner />}>
+                  <Route path="/store-owner" element={<StoreOwnerPage />} />
                 </Route>
               </Route>
 

@@ -25,6 +25,7 @@ export default function Navbar() {
           <Link to="/help-me-choose">Help Me Choose</Link>
           <Link to="/books?secondHand=true">Second-Hand</Link>
           {user?.role === "admin" && <Link to="/admin">Admin</Link>}
+          {user?.role === "store_owner" && <Link to="/store-owner">My Store</Link>}
         </nav>
 
         <div className="navbar-actions">
@@ -38,6 +39,7 @@ export default function Navbar() {
           {user ? (
             <div className="navbar-user">
               {user.role === "customer" && <Link to="/orders">Orders</Link>}
+              {user.role === "store_owner" && <Link to="/store-owner">Store</Link>}
               <Link to="/profile">{user.name}</Link>
               <button className="btn btn-outline btn-sm" onClick={handleLogout}>
                 Log out

@@ -31,7 +31,12 @@ export default function LoginPage() {
     try {
       const user = await login(trimmedEmail, password);
       showToast(`Welcome back, ${user.name.split(" ")[0]}.`, "success");
-      const dest = user.role === "admin" ? "/admin" : (location.state?.from as any)?.pathname || "/";
+      const dest =
+        user.role === "admin"
+          ? "/admin"
+          : user.role === "store_owner"
+            ? "/store-owner"
+            : (location.state?.from as any)?.pathname || "/";
       navigate(dest, { replace: true });
     } catch (err: any) {
       setError(err.message || "Login failed.");
