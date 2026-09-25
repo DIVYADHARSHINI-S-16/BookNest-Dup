@@ -6,7 +6,7 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 export interface JwtPayload {
   userId: string;
   email: string;
-  role: "customer" | "admin";
+  role: "customer" | "admin" | "store_owner";
 }
 
 export function signToken(payload: JwtPayload): string {

@@ -5,7 +5,12 @@ import { pool } from "./pool";
 // Base schema, then any phase-specific ALTER migrations, applied in order.
 // Each file is idempotent (IF NOT EXISTS / DROP ... IF EXISTS) so re-running
 // this script on an already-migrated database is safe.
-const MIGRATION_FILES = ["schema.sql", "migrations_phase1d.sql", "migrations_phase1e.sql"];
+const MIGRATION_FILES = [
+  "schema.sql",
+  "migrations_phase1d.sql",
+  "migrations_phase1e.sql",
+  "migrations_phase1f.sql",
+];
 
 async function migrate() {
   for (const file of MIGRATION_FILES) {

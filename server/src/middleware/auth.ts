@@ -32,7 +32,7 @@ export function requireAuth(
 /**
  * Restricts a route to one or more roles. Must run after requireAuth.
  */
-export function requireRole(...roles: Array<"customer" | "admin">) {
+export function requireRole(...roles: Array<"customer" | "admin" | "store_owner">) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {
       res.status(401).json({ error: "Authentication required." });
