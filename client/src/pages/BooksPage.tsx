@@ -47,7 +47,7 @@ export default function BooksPage() {
     if (secondHand) query.set("secondHand", secondHand);
     query.set("sort", sort);
     query.set("page", page);
-    query.set("limit", "12");
+    query.set("limit", "15");
 
     api
       .get<BooksResponse>(`/books?${query.toString()}`)
@@ -60,7 +60,7 @@ export default function BooksPage() {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
     else next.delete(key);
-    next.delete("page"); // reset pagination on filter change
+    if (key !== "page") next.delete("page"); // reset pagination on filter change only
     setParams(next);
   }
 

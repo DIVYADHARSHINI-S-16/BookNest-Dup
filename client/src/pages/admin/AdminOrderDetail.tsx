@@ -71,7 +71,15 @@ export default function AdminOrderDetail() {
         <tbody>
           {order.items.map((item: any) => (
             <tr key={item.id}>
-              <td>{item.title}</td>
+              <td>
+                {item.title}
+                {item.storeName && (
+                  <>
+                    <br />
+                    <small>From {item.storeName}</small>
+                  </>
+                )}
+              </td>
               <td>{item.quantity}</td>
               <td>₹{item.unitPrice.toFixed(2)}</td>
               <td>₹{item.lineTotal.toFixed(2)}</td>

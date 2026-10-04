@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
-import { validateStoreInput } from "../utils/validation";
+import { validateStoreInput, isValidUuid } from "../utils/validation";
+import { getCache, setCache } from "../utils/cache";
 
 function normalizeSlug(value: string): string {
   return value
@@ -65,6 +66,56 @@ function getStorePayload(body: any) {
     latitude,
     longitude,
   };
+}
+
+/**
+ * GET /api/books/:bookId/store-listings
+ * Public. Shows every store currently offering this book — active listings
+ * with quantity > 0 only, so customers never see an out-of-stock or
+ * deactivated option to pick from.
+ */
+export async function getBookStoreListings(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { bookId } = req.params;
+    if (!isValidUuid(bookId)) throw new AppError("Invalid book ID.", 400);
+
+    const cacheKey = `book:store-listings:${bookId}`;
+    const cached = await getCache<any>(cacheKey);
+    if (cached) return res.json(cached);
+
+    const bookExists = await pool.query("SELECT id FROM books WHERE id = $1", [bookId]);
+    if (bookExists.rows.length === 0) throw new AppError("Book not found.", 404);
+
+    const result = await pool.query(
+      `SELECT sbi.id AS listing_id, sbi.price, sbi.quantity, sbi.reserved,
+              s.id AS store_id, s.name AS store_name, s.city, s.state
+       FROM store_book_inventory sbi
+       JOIN stores s ON s.id = sbi.store_id
+       WHERE sbi.book_id = $1
+         AND sbi.is_active = true
+         AND s.is_active = true
+         AND (sbi.quantity - sbi.reserved) > 0
+       ORDER BY sbi.price ASC`,
+      [bookId]
+    );
+
+    const responseBody = {
+      listings: result.rows.map((row) => ({
+        listingId: row.listing_id,
+        storeId: row.store_id,
+        storeName: row.store_name,
+        city: row.city,
+        state: row.state,
+        price: Number(row.price),
+        availableQuantity: Math.max(row.quantity - row.reserved, 0),
+      })),
+    };
+
+    await setCache(cacheKey, responseBody, 60);
+    res.json(responseBody);
+  } catch (err) {
+    next(err);
+  }
 }
 
 export async function listStoresForAdmin(_req: Request, res: Response, next: NextFunction) {

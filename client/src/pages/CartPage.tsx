@@ -57,6 +57,11 @@ export default function CartPage() {
                   {item.title}
                 </Link>
                 <p className="cart-item-author">{item.author}</p>
+                {item.storeName && (
+                  <p className="badge" style={{ marginTop: "0.25rem" }}>
+                    From {item.storeName}
+                  </p>
+                )}
                 {item.exceedsStock && (
                   <p className="badge badge-danger">
                     Only {item.availableQuantity} in stock — reduce quantity

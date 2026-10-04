@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import BookCard, { BookSummary } from "../components/BookCard";
 import { LoadingState, ErrorState, EmptyState } from "../components/StateBlocks";
@@ -31,7 +32,7 @@ export default function HomePage() {
     if (searchTerm.trim()) query.set("q", searchTerm.trim());
     if (activeCategory) query.set("category", activeCategory);
     query.set("sort", "newest");
-    query.set("limit", "12");
+    query.set("limit", "15");
 
     api
       .get<{ books: BookSummary[]; pagination: { total: number } }>(`/books?${query.toString()}`)
@@ -99,6 +100,14 @@ export default function HomePage() {
           {books.map((book) => (
             <BookCard key={book.id} book={book} />
           ))}
+        </div>
+      )}
+
+      {books && total > books.length && (
+        <div style={{ textAlign: "center", marginTop: "1.5rem" }}>
+          <Link to="/books" className="btn btn-outline">
+            View all {total} books →
+          </Link>
         </div>
       )}
     </div>

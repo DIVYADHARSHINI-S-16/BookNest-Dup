@@ -55,7 +55,7 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
 
     // Lock the cart's rows against concurrent checkout attempts by the same user.
     const cartItemsResult = await client.query(
-      `SELECT ci.id, ci.book_id, ci.quantity, b.title, b.price
+      `SELECT ci.id, ci.book_id, ci.quantity, ci.store_id, ci.store_price, b.title, b.price
        FROM cart_items ci
        JOIN books b ON b.id = ci.book_id
        WHERE ci.cart_id = $1
@@ -68,19 +68,59 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
     }
 
     let subtotal = 0;
-    const lineItems: { bookId: string; quantity: number; unitPrice: number }[] = [];
+    const lineItems: {
+      bookId: string;
+      quantity: number;
+      unitPrice: number;
+      storeId: string | null;
+    }[] = [];
 
     for (const item of cartItemsResult.rows) {
-      // Stock for this exact quantity was already reserved (inventory.reserved)
-      // the moment it was added to the cart, so there is no separate
-      // over-stock check to do here — we just lock the row before writing
-      // to it so two simultaneous checkouts can't race on the same book.
-      await client.query("SELECT quantity, reserved FROM inventory WHERE book_id = $1 FOR UPDATE", [
-        item.book_id,
-      ]);
+      if (item.store_id) {
+        // Store-sourced line: lock the specific listing and re-validate it's
+        // still active and has enough stock, since it may have changed since
+        // it was added to the cart (owner deactivated it, lowered quantity,
+        // or someone else's checkout raced ahead of this one).
+        const listingResult = await client.query(
+          `SELECT id, price, quantity, reserved, is_active FROM store_book_inventory
+           WHERE store_id = $1 AND book_id = $2 FOR UPDATE`,
+          [item.store_id, item.book_id]
+        );
+        const listing = listingResult.rows[0];
+        if (!listing || !listing.is_active) {
+          throw new AppError(`"${item.title}" is no longer available from that store.`, 409);
+        }
+        if (listing.quantity < item.quantity) {
+          throw new AppError(
+            `Only ${listing.quantity} copies of "${item.title}" are available from that store now.`,
+            409
+          );
+        }
 
-      subtotal += Number(item.price) * item.quantity;
-      lineItems.push({ bookId: item.book_id, quantity: item.quantity, unitPrice: Number(item.price) });
+        subtotal += Number(listing.price) * item.quantity;
+        lineItems.push({
+          bookId: item.book_id,
+          quantity: item.quantity,
+          unitPrice: Number(listing.price),
+          storeId: item.store_id,
+        });
+      } else {
+        // Catalog line: stock for this exact quantity was already reserved
+        // (inventory.reserved) the moment it was added to the cart, so there
+        // is no separate over-stock check to do here — we just lock the row
+        // before writing to it so two simultaneous checkouts can't race.
+        await client.query("SELECT quantity, reserved FROM inventory WHERE book_id = $1 FOR UPDATE", [
+          item.book_id,
+        ]);
+
+        subtotal += Number(item.price) * item.quantity;
+        lineItems.push({
+          bookId: item.book_id,
+          quantity: item.quantity,
+          unitPrice: Number(item.price),
+          storeId: null,
+        });
+      }
     }
 
     const total = subtotal; // no tax/shipping fee in Phase 1
@@ -96,22 +136,35 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
 
     for (const line of lineItems) {
       await client.query(
-        `INSERT INTO order_items (order_id, book_id, quantity, unit_price)
-         VALUES ($1, $2, $3, $4)`,
-        [order.id, line.bookId, line.quantity, line.unitPrice]
+        `INSERT INTO order_items (order_id, book_id, quantity, unit_price, store_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [order.id, line.bookId, line.quantity, line.unitPrice, line.storeId]
       );
 
       // Permanently deduct the purchased copies from real stock, and
       // release this cart's reservation for them at the same time (the
       // hold becomes an actual sale instead of a pending cart item).
-      await client.query(
-        `UPDATE inventory
-         SET quantity = quantity - $1,
-             reserved = GREATEST(reserved - $1, 0),
-             updated_at = now()
-         WHERE book_id = $2`,
-        [line.quantity, line.bookId]
-      );
+      // Store-sourced lines deduct from that specific store's own listing;
+      // catalog lines deduct from the shared legacy inventory table.
+      if (line.storeId) {
+        await client.query(
+          `UPDATE store_book_inventory
+           SET quantity = quantity - $1,
+               reserved = GREATEST(reserved - $1, 0),
+               last_updated = now()
+           WHERE store_id = $2 AND book_id = $3`,
+          [line.quantity, line.storeId, line.bookId]
+        );
+      } else {
+        await client.query(
+          `UPDATE inventory
+           SET quantity = quantity - $1,
+               reserved = GREATEST(reserved - $1, 0),
+               updated_at = now()
+           WHERE book_id = $2`,
+          [line.quantity, line.bookId]
+        );
+      }
     }
 
     await client.query("DELETE FROM cart_items WHERE cart_id = $1", [cartId]);
@@ -154,8 +207,11 @@ async function fetchOrderWithItems(orderId: string) {
   if (!order) return null;
 
   const itemsResult = await pool.query(
-    `SELECT oi.id, oi.book_id, oi.quantity, oi.unit_price, b.title, b.author, b.cover_image_url
-     FROM order_items oi JOIN books b ON b.id = oi.book_id
+    `SELECT oi.id, oi.book_id, oi.quantity, oi.unit_price, oi.store_id,
+            b.title, b.author, b.cover_image_url, s.name AS store_name
+     FROM order_items oi
+     JOIN books b ON b.id = oi.book_id
+     LEFT JOIN stores s ON s.id = oi.store_id
      WHERE oi.order_id = $1`,
     [orderId]
   );
@@ -172,6 +228,8 @@ async function fetchOrderWithItems(orderId: string) {
       quantity: row.quantity,
       unitPrice: Number(row.unit_price),
       lineTotal: Number((row.unit_price * row.quantity).toFixed(2)),
+      storeId: row.store_id,
+      storeName: row.store_name,
     })),
   };
 }

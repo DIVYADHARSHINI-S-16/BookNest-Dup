@@ -10,6 +10,7 @@ import {
 import { requireAuth, requireRole } from "../middleware/auth";
 import reviewRoutes from "./reviewRoutes";
 import secondHandRoutes from "./secondHandRoutes";
+import { getBookStoreListings } from "../controllers/storeController";
 
 const router = Router();
 
@@ -20,6 +21,7 @@ router.get("/:id", getBookById);
 // Nested resources
 router.use("/:bookId/reviews", reviewRoutes);
 router.use("/:bookId/second-hand", secondHandRoutes);
+router.get("/:bookId/store-listings", getBookStoreListings);
 
 // Admin only: manage catalog
 router.post("/", requireAuth, requireRole("admin"), createBook);

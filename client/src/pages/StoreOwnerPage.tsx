@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api } from "../api/client";
 import { LoadingState } from "../components/StateBlocks";
+import StoreInventoryPanel from "../components/StoreInventoryPanel";
 
 interface StoreFormState {
   name: string;
@@ -180,6 +181,12 @@ export default function StoreOwnerPage() {
           </button>
         </form>
       </div>
+
+      {store && (
+        <div className="card" style={{ padding: "2rem", marginTop: "1.5rem" }}>
+          <StoreInventoryPanel />
+        </div>
+      )}
     </div>
   );
 }

@@ -33,6 +33,16 @@ interface BookDetail {
   secondHandCondition: SecondHandCondition | null;
 }
 
+interface StoreListing {
+  listingId: string;
+  storeId: string;
+  storeName: string;
+  city: string | null;
+  state: string | null;
+  price: number;
+  availableQuantity: number;
+}
+
 interface Review {
   id: string;
   rating: number;
@@ -59,6 +69,10 @@ export default function BookDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [addingToCart, setAddingToCart] = useState(false);
 
+  const [storeListings, setStoreListings] = useState<StoreListing[] | null>(null);
+  const [selectedStoreListingId, setSelectedStoreListingId] = useState<string | null>(null);
+  const [addingStoreToCart, setAddingStoreToCart] = useState(false);
+
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -76,8 +90,27 @@ export default function BookDetailPage() {
       .then((res) => setBook(res.book))
       .catch((err) => setError(err.message));
     loadReviews().catch(() => {});
+    api
+      .get<{ listings: StoreListing[] }>(`/books/${id}/store-listings`)
+      .then((res) => setStoreListings(res.listings))
+      .catch(() => setStoreListings([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function handleAddStoreListingToCart() {
+    if (!id || !selectedStoreListingId || !storeListings) return;
+    const listing = storeListings.find((l) => l.listingId === selectedStoreListingId);
+    if (!listing) return;
+    setAddingStoreToCart(true);
+    try {
+      await addToCart(id, 1, listing.storeId);
+      showToast(`Added to cart from ${listing.storeName}.`, "success");
+    } catch (err: any) {
+      showToast(err.message, "error");
+    } finally {
+      setAddingStoreToCart(false);
+    }
+  }
 
   async function handleAddToCart() {
     if (!id) return;
@@ -196,6 +229,40 @@ export default function BookDetailPage() {
           )}
         </div>
       </div>
+
+      {storeListings && storeListings.length > 0 && (
+        <section className="card" style={{ padding: "1.25rem", marginTop: "1.5rem" }}>
+          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Available at Stores</h2>
+          <ul style={{ listStyle: "none", padding: 0, margin: "0.5rem 0" }}>
+            {storeListings.map((listing) => (
+              <li key={listing.listingId} style={{ marginBottom: "0.5rem" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="storeListing"
+                    checked={selectedStoreListingId === listing.listingId}
+                    onChange={() => setSelectedStoreListingId(listing.listingId)}
+                  />
+                  <span>
+                    <strong>{listing.storeName}</strong>
+                    {listing.city && <span> ({listing.city})</span>} — ₹{listing.price.toFixed(2)} —{" "}
+                    {listing.availableQuantity} available
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {user?.role === "customer" && (
+            <button
+              className="btn btn-sm"
+              disabled={!selectedStoreListingId || addingStoreToCart}
+              onClick={handleAddStoreListingToCart}
+            >
+              {addingStoreToCart ? "Adding…" : "Add selected store's listing to cart"}
+            </button>
+          )}
+        </section>
+      )}
 
       <section className="reviews-section">
         <h2 className="page-title" style={{ fontSize: "1.3rem" }}>

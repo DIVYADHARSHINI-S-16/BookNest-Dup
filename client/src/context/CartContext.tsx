@@ -12,6 +12,8 @@ export interface CartItem {
   quantity: number;
   availableQuantity: number;
   exceedsStock: boolean;
+  storeId?: string | null;
+  storeName?: string | null;
 }
 
 export interface CartData {
@@ -27,7 +29,7 @@ interface CartContextValue {
   cart: CartData;
   loading: boolean;
   refresh: () => Promise<void>;
-  addToCart: (bookId: string, quantity?: number) => Promise<void>;
+  addToCart: (bookId: string, quantity?: number, storeId?: string) => Promise<void>;
   changeQuantity: (bookId: string, action: "increase" | "decrease") => Promise<void>;
   removeItem: (bookId: string) => Promise<void>;
 }
@@ -57,8 +59,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     refresh();
   }, [refresh]);
 
-  async function addToCart(bookId: string, quantity = 1) {
-    const res = await api.post<CartData>("/cart", { bookId, quantity });
+  async function addToCart(bookId: string, quantity = 1, storeId?: string) {
+    const res = await api.post<CartData>("/cart", { bookId, quantity, storeId });
     setCart(res);
   }
 

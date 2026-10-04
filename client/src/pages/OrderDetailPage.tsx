@@ -11,6 +11,8 @@ interface OrderItem {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  storeId?: string | null;
+  storeName?: string | null;
 }
 
 interface OrderDetail {
@@ -63,7 +65,15 @@ export default function OrderDetailPage() {
             <tbody>
               {order.items.map((item) => (
                 <tr key={item.id}>
-                  <td>{item.title}</td>
+                  <td>
+                    {item.title}
+                    {item.storeName && (
+                      <>
+                        <br />
+                        <small className="badge">From {item.storeName}</small>
+                      </>
+                    )}
+                  </td>
                   <td>{item.quantity}</td>
                   <td>₹{item.unitPrice.toFixed(2)}</td>
                   <td>₹{item.lineTotal.toFixed(2)}</td>

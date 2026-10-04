@@ -118,3 +118,15 @@
   background: #f1ede4;
   color: var(--color-accent);
 }
+
+/* ---- Sign up button: keep text readable (beats the .navbar-user a link colour) ---- */
+.navbar-user a.btn {
+  background: var(--color-accent);
+  color: #fff;
+  padding: 0.35rem 0.9rem;
+}
+
+.navbar-user a.btn:hover {
+  background: var(--color-accent-hover);
+  color: #fff;
+}
