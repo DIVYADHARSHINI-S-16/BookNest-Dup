@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://replace-with-your-render-host.invalid/api/:path*"
+      "destination": "destination": "https://booknest-server-p7jb.onrender.com/api/:path*"
     },
     {
       "source": "/((?!api/).*)",
