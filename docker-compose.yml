@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: booknest_pass
       POSTGRES_DB: booknest_db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
     container_name: booknest_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -48,6 +48,12 @@ services:
       REDIS_URL: redis://redis:6379
       CLIENT_ORIGIN: http://localhost:5173
       PORT: 4000
+      # Required: the server refuses to start without a strong secret (32+ chars).
+      # Put JWT_SECRET=<long random string> in a .env file next to this file, or export it.
+      # Generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET (32+ random characters) in .env or your shell before running docker compose}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      NODE_ENV: ${NODE_ENV:-production}
     ports:
       - "4000:4000"
 

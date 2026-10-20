@@ -41,12 +41,41 @@ export async function invalidateBookCaches(bookId?: string): Promise<void> {
   await deleteCacheByPrefix("books:list:");
   if (bookId) {
     await deleteCacheByPrefix(`book:detail:${bookId}`);
+    // Store listings are cached per book too; a deleted (or edited) book must
+    // not keep serving a stale listings response for up to the TTL.
+    await deleteCacheByPrefix(`book:store-listings:${bookId}`);
   } else {
     await deleteCacheByPrefix("book:detail:");
+    await deleteCacheByPrefix("book:store-listings:");
   }
+}
+
+/**
+ * Call after a store's public details change (name, city, state, ...).
+ * Store-listings responses embed those fields for every book the store
+ * stocks, so all of them are cleared.
+ */
+export async function invalidateStoreListingCaches(): Promise<void> {
+  await deleteCacheByPrefix("book:store-listings:");
 }
 
 export async function invalidateCategoryCaches(): Promise<void> {
   await deleteCacheByPrefix("categories:list");
   await invalidateBookCaches();
+}
+
+/**
+ * Call after any change to available stock (reservations, checkout, cancel).
+ * Availability is shown in the books list, a book's detail page and the
+ * store-listings dropdown, and all three are cached for up to 60s — so
+ * clear them or customers would see stale "in stock" numbers.
+ */
+export async function invalidateAvailabilityCaches(bookIds: string[]): Promise<void> {
+  const unique = Array.from(new Set(bookIds));
+  if (unique.length === 0) return;
+  await deleteCacheByPrefix("books:list:");
+  for (const id of unique) {
+    await deleteCacheByPrefix(`book:store-listings:${id}`);
+    await deleteCacheByPrefix(`book:detail:${id}`);
+  }
 }

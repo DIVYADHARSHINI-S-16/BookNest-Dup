@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
-import { isValidUuid } from "../utils/validation";
+import { isValidUuid, parseNonNegativeInt } from "../utils/validation";
 import { deleteCacheByPrefix } from "../utils/cache";
 
 /**
@@ -131,31 +131,56 @@ export async function updateStoreInventoryItem(req: Request, res: Response, next
     const listing = existing.rows[0];
     if (!listing) throw new AppError("This book is not listed in your store.", 404);
 
-    const nextPrice = price !== undefined ? Number(price) : Number(listing.price);
-    if (Number.isNaN(nextPrice) || nextPrice < 0) {
-      throw new AppError("Price must be a valid, non-negative number.", 422);
+    // Only the fields the caller sent are changed (null = keep the stored value).
+    let nextPrice: number | null = null;
+    if (price !== undefined) {
+      nextPrice = Number(price);
+      if (price === null || price === "" || !Number.isFinite(nextPrice) || nextPrice < 0) {
+        throw new AppError("Price must be a valid, non-negative number.", 422);
+      }
     }
 
-    const nextQuantity = quantity !== undefined ? Number(quantity) : listing.quantity;
-    if (!Number.isInteger(nextQuantity) || nextQuantity < 0) {
-      throw new AppError("Quantity must be a valid, non-negative whole number.", 422);
-    }
-    if (nextQuantity < listing.reserved) {
-      throw new AppError(
-        `Quantity can't be less than ${listing.reserved}, the amount currently reserved in customer carts.`,
-        422
-      );
+    let nextQuantity: number | null = null;
+    if (quantity !== undefined) {
+      nextQuantity = parseNonNegativeInt(quantity);
+      if (nextQuantity === null) {
+        throw new AppError("Quantity must be a valid, non-negative whole number.", 422);
+      }
     }
 
-    const nextIsActive = isActive !== undefined ? Boolean(isActive) : listing.is_active;
+    let nextIsActive: boolean | null = null;
+    if (isActive !== undefined) {
+      if (typeof isActive !== "boolean") throw new AppError("isActive must be true or false.", 422);
+      nextIsActive = isActive;
+    }
 
+    // The "quantity can't drop below reserved" rule is part of the UPDATE's
+    // WHERE clause, so it is checked atomically against the row's current
+    // `reserved`. A cart reservation that commits at the same moment either
+    // lands first (this update then matches no row and is refused) or waits
+    // on the row lock and sees the new quantity. COALESCE keeps unsent fields
+    // as stored, so a concurrent change to another field isn't overwritten.
     const result = await pool.query(
       `UPDATE store_book_inventory
-       SET price = $1, quantity = $2, is_active = $3, last_updated = now()
-       WHERE id = $4
+       SET price = COALESCE($1, price),
+           quantity = COALESCE($2, quantity),
+           is_active = COALESCE($3, is_active),
+           last_updated = now()
+       WHERE id = $4 AND reserved <= COALESCE($2, quantity)
        RETURNING id`,
       [nextPrice, nextQuantity, nextIsActive, listing.id]
     );
+
+    if (result.rows.length === 0) {
+      const latest = await pool.query("SELECT reserved FROM store_book_inventory WHERE id = $1", [
+        listing.id,
+      ]);
+      if (latest.rows.length === 0) throw new AppError("This book is not listed in your store.", 404);
+      throw new AppError(
+        `Quantity can't be less than ${latest.rows[0].reserved}, the amount currently reserved in customer carts.`,
+        422
+      );
+    }
 
     await invalidateListingCaches(bookId);
     res.json({ id: result.rows[0].id });

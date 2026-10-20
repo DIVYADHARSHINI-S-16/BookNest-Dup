@@ -2,7 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
 import { validateStoreInput, isValidUuid } from "../utils/validation";
-import { getCache, setCache } from "../utils/cache";
+import { getCache, setCache, invalidateStoreListingCaches } from "../utils/cache";
+import { parseCoordinatePair } from "../utils/geo";
 
 function normalizeSlug(value: string): string {
   return value
@@ -155,6 +156,12 @@ export async function createStore(req: Request, res: Response, next: NextFunctio
       throw new AppError(errors.join(" "), 422);
     }
 
+    // Optional location: both coordinates or neither, each range-checked (-90..90 / -180..180).
+    const coords = parseCoordinatePair(req.body.latitude, req.body.longitude);
+    if (!coords.ok) {
+      throw new AppError(coords.error, 422);
+    }
+
     const existingStore = await pool.query(
       "SELECT id FROM stores WHERE owner_user_id = $1",
       [req.user!.userId]
@@ -190,8 +197,8 @@ export async function createStore(req: Request, res: Response, next: NextFunctio
         payload.state,
         payload.postalCode,
         payload.country,
-        payload.latitude,
-        payload.longitude,
+        coords.value ? coords.value.latitude : null,
+        coords.value ? coords.value.longitude : null,
       ]
     );
 
@@ -241,6 +248,24 @@ export async function updateStore(req: Request, res: Response, next: NextFunctio
       }
     }
 
+    // Location is only re-validated and rewritten when the request actually contains
+    // latitude/longitude; otherwise the stored values are left exactly as they are, so an
+    // owner can edit other fields even if a legacy row holds odd coordinates.
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    let nextLatitude: number | string | null = existing.latitude;
+    let nextLongitude: number | string | null = existing.longitude;
+    if ("latitude" in body || "longitude" in body) {
+      const coords = parseCoordinatePair(
+        "latitude" in body ? body.latitude : existing.latitude,
+        "longitude" in body ? body.longitude : existing.longitude
+      );
+      if (!coords.ok) {
+        throw new AppError(coords.error, 422);
+      }
+      nextLatitude = coords.value ? coords.value.latitude : null;
+      nextLongitude = coords.value ? coords.value.longitude : null;
+    }
+
     const result = await pool.query(
       `UPDATE stores
        SET name = $1,
@@ -269,12 +294,14 @@ export async function updateStore(req: Request, res: Response, next: NextFunctio
         payload.state,
         payload.postalCode,
         payload.country,
-        payload.latitude,
-        payload.longitude,
+        nextLatitude,
+        nextLongitude,
         req.user!.userId,
       ]
     );
 
+    // Listings show the store's name/city/state, so cached copies are stale now.
+    await invalidateStoreListingCaches();
     res.json({ store: serializeStore(result.rows[0]) });
   } catch (err) {
     next(err);

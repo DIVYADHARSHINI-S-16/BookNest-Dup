@@ -1,0 +1,12 @@
+# Docker reads this file from the BUILD CONTEXT ROOT (./server, see docker-compose.yml).
+# It used to live in server/src/, where Docker ignores it, so `COPY . .` copied
+# server/.env, node_modules and dist into the image.
+node_modules
+dist
+.env
+.env.*
+!.env.example
+npm-debug.log*
+*.log
+*.tsbuildinfo
+tests

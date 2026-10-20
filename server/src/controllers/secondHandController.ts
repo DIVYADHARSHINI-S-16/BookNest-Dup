@@ -142,7 +142,7 @@ export async function upsertSecondHandCondition(req: Request, res: Response, nex
       await invalidateBookCaches(bookId);
       res.status(200).json({ condition: formatCondition(result.rows[0]) });
     } catch (err) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       throw err;
     } finally {
       client.release();
@@ -170,7 +170,7 @@ export async function deleteSecondHandCondition(req: Request, res: Response, nex
       await invalidateBookCaches(bookId);
       res.status(204).send();
     } catch (err) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       throw err;
     } finally {
       client.release();

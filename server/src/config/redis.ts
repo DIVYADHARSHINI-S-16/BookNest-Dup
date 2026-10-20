@@ -7,7 +7,8 @@ export const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://localhost:6379",
   socket: {
     // Give up quickly instead of hanging forever if Redis is unreachable.
-    connectTimeout: 2000,
+    // 5s tolerates TLS handshake to a remote Upstash instance. Use a rediss:// URL for TLS.
+    connectTimeout: 5000,
     // Stop retrying after 3 attempts so a dead Redis can't flood logs
     // or hold requests forever; the app just runs without a cache.
     reconnectStrategy: (retries) => {

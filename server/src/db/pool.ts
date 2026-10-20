@@ -23,3 +23,17 @@ export async function testConnection(): Promise<void> {
     client.release();
   }
 }
+
+/**
+ * "host / database" of the configured DATABASE_URL, for log lines. Never includes
+ * the user name, password or query string. Lets you see which database a
+ * migration or seed is about to touch.
+ */
+export function describeDatabaseTarget(): string {
+  try {
+    const u = new URL(process.env.DATABASE_URL || "");
+    return `${u.hostname}${u.port ? ":" + u.port : ""} / ${decodeURIComponent(u.pathname.replace(/^\//, ""))}`;
+  } catch {
+    return "(DATABASE_URL missing or not a valid URL)";
+  }
+}

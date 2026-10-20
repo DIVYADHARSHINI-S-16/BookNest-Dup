@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { pool } from "./pool";
+import { pool, describeDatabaseTarget } from "./pool";
 import { hashPassword } from "../utils/password";
 
 async function seedDemoAccounts() {
@@ -102,22 +102,49 @@ const SEED_FILES = [
   "add_second_hand_books.sql",
 ];
 
+// Demo accounts use publicly documented passwords, so they must never be
+// created (or have their password reset) on a live database.
+function assertDemoAccountsAllowed(): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Refusing to create demo accounts: NODE_ENV=production. Use `npm run db:seed:catalog` (books only) instead."
+    );
+  }
+  let host = "";
+  try {
+    host = new URL(process.env.DATABASE_URL || "").hostname;
+  } catch {
+    throw new Error("DATABASE_URL is missing or not a valid URL.");
+  }
+  const local = ["localhost", "127.0.0.1", "::1", "[::1]", "postgres"];
+  if (!local.includes(host) && process.env.ALLOW_DEMO_SEED_REMOTE !== "true") {
+    throw new Error(
+      `Refusing to create demo accounts on non-local database host "${host}". Use \`npm run db:seed:catalog\` (books only).`
+    );
+  }
+}
+
 async function seed() {
-  console.log("Seeding database...");
+  const catalogOnly = process.argv.includes("--catalog-only");
+  console.log(`Target database: ${describeDatabaseTarget()}`);
+  if (!catalogOnly) assertDemoAccountsAllowed(); // before any query runs
+  console.log(catalogOnly ? "Seeding catalog only (no demo accounts)..." : "Seeding database...");
   for (const file of SEED_FILES) {
     const filePath = path.join(__dirname, file);
     const sql = fs.readFileSync(filePath, "utf-8");
     await pool.query(sql);
     console.log(`${file} applied.`);
   }
-  await seedDemoAccounts();
-  await seedDemoStores();
+  if (!catalogOnly) {
+    await seedDemoAccounts();
+    await seedDemoStores();
+  }
   console.log("Seed data inserted successfully.");
 
   await pool.end();
 }
 
 seed().catch((err) => {
-  console.error("Seeding failed:", err);
+  console.error("Seeding failed:", err instanceof Error ? err.message : err);
   process.exit(1);
 });

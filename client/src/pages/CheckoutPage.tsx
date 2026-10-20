@@ -1,8 +1,24 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { useCart } from "../context/CartContext";
 import { EmptyState } from "../components/StateBlocks";
+
+interface PriceChange {
+  bookId: string;
+  title: string;
+  storeId: string;
+  storeName: string | null;
+  quantity: number;
+  previousPrice: number;
+  currentPrice: number;
+}
+
+interface PriceReview {
+  priceChanges: PriceChange[];
+  previousTotal: number;
+  newTotal: number;
+}
 
 export default function CheckoutPage() {
   const { cart, refresh } = useCart();
@@ -11,6 +27,8 @@ export default function CheckoutPage() {
   const [shippingAddress, setShippingAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [placing, setPlacing] = useState(false);
+  // Set when the server says store prices changed; the customer must confirm them.
+  const [priceReview, setPriceReview] = useState<PriceReview | null>(null);
 
   if (cart.items.length === 0) {
     return <EmptyState title="Your cart is empty" hint="Add a book before checking out." />;
@@ -21,13 +39,32 @@ export default function CheckoutPage() {
     setError(null);
     setPlacing(true);
     try {
+      // After the customer has seen the updated prices, send them back as
+      // confirmedPrices so the server knows they agreed to exactly these.
+      const confirmedPrices = priceReview?.priceChanges.map((c) => ({
+        bookId: c.bookId,
+        storeId: c.storeId,
+        unitPrice: c.currentPrice,
+      }));
       const res = await api.post<{ order: { id: string } }>("/orders/checkout", {
         shippingAddress,
+        ...(confirmedPrices ? { confirmedPrices } : {}),
       });
       await refresh();
       navigate("/order-success", { state: { orderId: res.order.id } });
     } catch (err: any) {
-      setError(err.message);
+      if (err instanceof ApiError && err.status === 409 && err.data?.code === "PRICE_CHANGED") {
+        // Nothing was charged. Show the new prices and wait for confirmation.
+        setPriceReview({
+          priceChanges: err.data.priceChanges,
+          previousTotal: err.data.previousTotal,
+          newTotal: err.data.newTotal,
+        });
+        await refresh();
+      } else {
+        setPriceReview(null);
+        setError(err.message);
+      }
     } finally {
       setPlacing(false);
     }
@@ -41,6 +78,26 @@ export default function CheckoutPage() {
       <div className="cart-layout">
         <form className="card checkout-form" onSubmit={handlePlaceOrder}>
           {error && <div className="form-error">{error}</div>}
+
+          {priceReview && (
+            <div className="form-error" role="alert">
+              <strong>Prices changed since you added these books.</strong>
+              <ul>
+                {priceReview.priceChanges.map((c) => (
+                  <li key={c.bookId}>
+                    {c.title}
+                    {c.storeName ? ` (${c.storeName})` : ""}: ₹{c.previousPrice.toFixed(2)} → ₹
+                    {c.currentPrice.toFixed(2)} × {c.quantity}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                Your new total is ₹{priceReview.newTotal.toFixed(2)} (was ₹
+                {priceReview.previousTotal.toFixed(2)}). Nothing has been charged. Review and
+                confirm below to place your order at the new price.
+              </p>
+            </div>
+          )}
 
           <div className="form-field">
             <label htmlFor="address">Shipping address</label>
@@ -64,7 +121,11 @@ export default function CheckoutPage() {
           </div>
 
           <button className="btn btn-block" type="submit" disabled={placing}>
-            {placing ? "Placing order…" : `Place order — ₹${cart.total.toFixed(2)}`}
+            {placing
+              ? "Placing order…"
+              : priceReview
+                ? `Confirm new price — ₹${priceReview.newTotal.toFixed(2)}`
+                : `Place order — ₹${cart.total.toFixed(2)}`}
           </button>
         </form>
 

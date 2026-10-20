@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from "express";
+import { PoolClient } from "pg";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
 import { getCache, setCache, invalidateBookCaches } from "../utils/cache";
-import { isValidUuid } from "../utils/validation";
+import { isValidUuid, parseIntegerId, parseNonNegativeInt, normalizeIsbn } from "../utils/validation";
 
 const SORTABLE_COLUMNS: Record<string, string> = {
   title: "b.title",
@@ -215,59 +216,113 @@ export async function getBookById(req: Request, res: Response, next: NextFunctio
   }
 }
 
+interface BookInput {
+  title: string;
+  author: string;
+  description: string | null;
+  isbn: string | null;
+  price: number;
+  coverImageUrl: string;
+  categoryId: number;
+  isSecondHand: boolean;
+  quantity: number | undefined;
+}
+
+/**
+ * Validates the create/update book body. Throws a 422 listing every problem.
+ * `quantity` is optional; when given it must be a non-negative whole number.
+ */
+function parseBookInput(body: any): BookInput {
+  const { title, author, description, isbn, price, coverImageUrl, categoryId, isSecondHand, quantity } =
+    body || {};
+  const errors: string[] = [];
+
+  if (!title || typeof title !== "string" || !title.trim()) errors.push("Title is required.");
+  else if (title.trim().length > 255) errors.push("Title must be 255 characters or fewer.");
+
+  if (!author || typeof author !== "string" || !author.trim()) errors.push("Author is required.");
+  else if (author.trim().length > 160) errors.push("Author must be 160 characters or fewer.");
+
+  if (
+    price === undefined ||
+    price === null ||
+    price === "" ||
+    Number.isNaN(Number(price)) ||
+    !Number.isFinite(Number(price)) ||
+    Number(price) < 0
+  ) {
+    errors.push("A valid, non-negative price is required.");
+  }
+
+  const parsedCategoryId = parseIntegerId(categoryId);
+  if (parsedCategoryId === null) errors.push("categoryId must be a valid category ID (a whole number).");
+
+  const isbnResult = normalizeIsbn(isbn);
+  if (!isbnResult.ok) errors.push("ISBN must be 10 or 13 characters (digits; hyphens and spaces are ignored).");
+
+  let parsedQuantity: number | undefined;
+  if (quantity !== undefined && quantity !== null && quantity !== "") {
+    const q = parseNonNegativeInt(quantity);
+    if (q === null) errors.push("Quantity must be a non-negative whole number.");
+    else parsedQuantity = q;
+  }
+
+  if (errors.length) throw new AppError(errors.join(" "), 422);
+
+  return {
+    title: title.trim(),
+    author: author.trim(),
+    description: description || null,
+    isbn: isbnResult.ok ? isbnResult.isbn : null,
+    price: Number(price),
+    coverImageUrl: coverImageUrl || "",
+    categoryId: parsedCategoryId as number,
+    isSecondHand: Boolean(isSecondHand),
+    quantity: parsedQuantity,
+  };
+}
+
+async function assertCategoryExists(client: PoolClient, categoryId: number): Promise<void> {
+  const result = await client.query("SELECT 1 FROM categories WHERE id = $1", [categoryId]);
+  if (result.rows.length === 0) throw new AppError("That category does not exist.", 422);
+}
+
 export async function createBook(req: Request, res: Response, next: NextFunction) {
   try {
-    const {
-      title,
-      author,
-      description,
-      isbn,
-      price,
-      coverImageUrl,
-      categoryId,
-      isSecondHand,
-      quantity,
-    } = req.body;
-
-    const errors: string[] = [];
-    if (!title || typeof title !== "string") errors.push("Title is required.");
-    if (!author || typeof author !== "string") errors.push("Author is required.");
-    if (price === undefined || Number.isNaN(Number(price)) || Number(price) < 0)
-      errors.push("A valid, non-negative price is required.");
-    if (!categoryId) errors.push("categoryId is required.");
-    if (errors.length) throw new AppError(errors.join(" "), 422);
+    const input = parseBookInput(req.body);
 
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await assertCategoryExists(client, input.categoryId);
 
       const bookResult = await client.query(
         `INSERT INTO books (title, author, description, isbn, price, cover_image_url, category_id, is_second_hand)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
         [
-          title.trim(),
-          author.trim(),
-          description || null,
-          isbn || null,
-          Number(price),
-          coverImageUrl || "",
-          categoryId,
-          Boolean(isSecondHand),
+          input.title,
+          input.author,
+          input.description,
+          input.isbn,
+          input.price,
+          input.coverImageUrl,
+          input.categoryId,
+          input.isSecondHand,
         ]
       );
       const bookId = bookResult.rows[0].id;
 
-      await client.query(
-        `INSERT INTO inventory (book_id, quantity) VALUES ($1, $2)`,
-        [bookId, Number.isFinite(Number(quantity)) ? Number(quantity) : 0]
-      );
+      await client.query(`INSERT INTO inventory (book_id, quantity) VALUES ($1, $2)`, [
+        bookId,
+        input.quantity ?? 0,
+      ]);
 
       await client.query("COMMIT");
       await invalidateBookCaches();
       res.status(201).json({ id: bookId });
     } catch (err) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       throw err;
     } finally {
       client.release();
@@ -277,33 +332,44 @@ export async function createBook(req: Request, res: Response, next: NextFunction
   }
 }
 
+/**
+ * Sets legacy stock for a book without ever dropping it below the amount
+ * currently reserved in carts. The check lives in the UPDATE's WHERE clause,
+ * so it is evaluated atomically against the row's committed `reserved` value:
+ * a cart reservation that commits first makes this update fail cleanly, and
+ * one that arrives later waits on the row lock and sees the new quantity.
+ * Returns false if the book has no inventory row.
+ */
+async function setLegacyQuantity(client: PoolClient, bookId: string, quantity: number): Promise<boolean> {
+  const updated = await client.query(
+    `UPDATE inventory SET quantity = $1, updated_at = now()
+     WHERE book_id = $2 AND reserved <= $1
+     RETURNING book_id`,
+    [quantity, bookId]
+  );
+  if (updated.rows.length > 0) return true;
+
+  const current = await client.query("SELECT reserved FROM inventory WHERE book_id = $1", [bookId]);
+  if (current.rows.length === 0) return false;
+  throw new AppError(
+    `Quantity can't be less than ${current.rows[0].reserved}, the amount currently reserved in customer carts.`,
+    422
+  );
+}
+
 export async function updateBook(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
     if (!isValidUuid(id)) throw new AppError("Invalid book ID.", 400);
-    const {
-      title,
-      author,
-      description,
-      isbn,
-      price,
-      coverImageUrl,
-      categoryId,
-      isSecondHand,
-      quantity,
-    } = req.body;
-
-    const errors: string[] = [];
-    if (!title || typeof title !== "string") errors.push("Title is required.");
-    if (!author || typeof author !== "string") errors.push("Author is required.");
-    if (price === undefined || Number.isNaN(Number(price)) || Number(price) < 0)
-      errors.push("A valid, non-negative price is required.");
-    if (!categoryId) errors.push("categoryId is required.");
-    if (errors.length) throw new AppError(errors.join(" "), 422);
+    const input = parseBookInput(req.body);
 
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await assertCategoryExists(client, input.categoryId);
+
+      // Same lock order as deleteBook/cart/checkout: stock row first, book second.
+      await client.query("SELECT id FROM inventory WHERE book_id = $1 FOR UPDATE", [id]);
 
       const result = await client.query(
         `UPDATE books SET
@@ -311,31 +377,29 @@ export async function updateBook(req: Request, res: Response, next: NextFunction
           price = $5, cover_image_url = $6, category_id = $7, is_second_hand = $8
          WHERE id = $9 RETURNING id`,
         [
-          title.trim(),
-          author.trim(),
-          description || null,
-          isbn || null,
-          Number(price),
-          coverImageUrl || "",
-          categoryId,
-          Boolean(isSecondHand),
+          input.title,
+          input.author,
+          input.description,
+          input.isbn,
+          input.price,
+          input.coverImageUrl,
+          input.categoryId,
+          input.isSecondHand,
           id,
         ]
       );
       if (result.rows.length === 0) throw new AppError("Book not found.", 404);
 
-      if (quantity !== undefined && !Number.isNaN(Number(quantity)) && Number(quantity) >= 0) {
-        await client.query(
-          `UPDATE inventory SET quantity = $1, updated_at = now() WHERE book_id = $2`,
-          [Number(quantity), id]
-        );
+      if (input.quantity !== undefined) {
+        // A 422 here rolls back the book edit too, so nothing is half-saved.
+        await setLegacyQuantity(client, id, input.quantity);
       }
 
       await client.query("COMMIT");
       await invalidateBookCaches(id);
       res.json({ id: result.rows[0].id });
     } catch (err) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       throw err;
     } finally {
       client.release();
@@ -349,28 +413,80 @@ export async function updateInventory(req: Request, res: Response, next: NextFun
   try {
     const { id } = req.params;
     if (!isValidUuid(id)) throw new AppError("Invalid book ID.", 400);
-    const { quantity } = req.body;
-    if (quantity === undefined || Number.isNaN(Number(quantity)) || Number(quantity) < 0) {
-      throw new AppError("A valid, non-negative quantity is required.", 422);
+    const quantity = parseNonNegativeInt(req.body?.quantity);
+    if (quantity === null) {
+      throw new AppError("A valid, non-negative whole-number quantity is required.", 422);
     }
-    const result = await pool.query(
-      `UPDATE inventory SET quantity = $1, updated_at = now() WHERE book_id = $2 RETURNING book_id`,
-      [Number(quantity), id]
-    );
-    if (result.rows.length === 0) throw new AppError("Book inventory record not found.", 404);
+
+    const client = await pool.connect();
+    try {
+      const found = await setLegacyQuantity(client, id, quantity);
+      if (!found) throw new AppError("Book inventory record not found.", 404);
+    } finally {
+      client.release();
+    }
     await invalidateBookCaches(id);
-    res.json({ bookId: result.rows[0].book_id, quantity: Number(quantity) });
+    res.json({ bookId: id, quantity });
   } catch (err) {
     next(err);
   }
 }
 
+/**
+ * DELETE /api/books/:id
+ * Refuses (409) while any order, cart or store listing references the book,
+ * and deletes nothing in that case. The book row is locked first
+ * (SELECT ... FOR UPDATE): inserting a cart line, order line or store listing
+ * takes a conflicting lock through its foreign key, so one cannot slip in
+ * between the reference check and the delete. Legacy inventory, reviews and
+ * second-hand condition rows still go with the book, as before.
+ */
 export async function deleteBook(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
     if (!isValidUuid(id)) throw new AppError("Invalid book ID.", 400);
-    const result = await pool.query("DELETE FROM books WHERE id = $1 RETURNING id", [id]);
-    if (result.rows.length === 0) throw new AppError("Book not found.", 404);
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Lock order matters: cart and checkout lock the stock row BEFORE they
+      // insert a cart/order line (which needs a share lock on the book), so
+      // this takes the legacy stock row first and the book second. The same
+      // order everywhere means no pair of requests can wait on each other.
+      await client.query("SELECT id FROM inventory WHERE book_id = $1 FOR UPDATE", [id]);
+      const locked = await client.query("SELECT id FROM books WHERE id = $1 FOR UPDATE", [id]);
+      if (locked.rows.length === 0) throw new AppError("Book not found.", 404);
+
+      const refs = await client.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM order_items WHERE book_id = $1) AS orders,
+           (SELECT COUNT(*)::int FROM cart_items WHERE book_id = $1) AS carts,
+           (SELECT COUNT(*)::int FROM store_book_inventory WHERE book_id = $1) AS store_listings`,
+        [id]
+      );
+      const { orders, carts, store_listings: storeListings } = refs.rows[0];
+      const blockers: string[] = [];
+      if (orders > 0) blockers.push("existing orders");
+      if (carts > 0) blockers.push("customer carts");
+      if (storeListings > 0) blockers.push("store listings");
+      if (blockers.length > 0) {
+        throw new AppError(
+          `This book can't be deleted because it is still referenced by ${blockers.join(", ")}. ` +
+            `Remove those references first; nothing was deleted.`,
+          409
+        );
+      }
+
+      await client.query("DELETE FROM books WHERE id = $1", [id]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+
     await invalidateBookCaches(id);
     res.status(204).send();
   } catch (err) {

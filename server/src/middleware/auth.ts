@@ -1,20 +1,44 @@
 import { Request, Response, NextFunction } from "express";
-import { verifyToken } from "../utils/jwt";
+import { verifyToken, JwtPayload } from "../utils/jwt";
+import { pool } from "../db/pool";
 
-/**
- * Reads the JWT from either the httpOnly cookie (preferred) or the
- * Authorization: Bearer header, verifies it, and attaches the decoded
- * payload to req.user.
- */
-export function requireAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
+function extractToken(req: Request): string | null {
   const bearer = req.headers.authorization?.startsWith("Bearer ")
     ? req.headers.authorization.slice(7)
     : null;
-  const token = req.cookies?.token || bearer;
+  return req.cookies?.token || bearer;
+}
+
+/**
+ * Verifies the token, then loads the user from the database so a deleted or
+ * demoted account cannot keep using stale JWT permissions. The role and email
+ * used for the request always come from the database, not the token.
+ * Returns null if the token is invalid or the account no longer exists.
+ */
+async function resolveUser(token: string): Promise<JwtPayload | null> {
+  let decoded: JwtPayload;
+  try {
+    decoded = verifyToken(token);
+  } catch {
+    return null;
+  }
+  const result = await pool.query("SELECT id, email, role FROM users WHERE id = $1", [decoded.userId]);
+  const row = result.rows[0];
+  if (!row) return null;
+  return { userId: row.id, email: row.email, role: row.role };
+}
+
+/**
+ * Reads the JWT from either the httpOnly cookie (preferred) or the
+ * Authorization: Bearer header, verifies it, confirms the account still
+ * exists, and attaches the current user (role from the database) to req.user.
+ */
+export async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const token = extractToken(req);
 
   if (!token) {
     res.status(401).json({ error: "Authentication required." });
@@ -22,10 +46,16 @@ export function requireAuth(
   }
 
   try {
-    req.user = verifyToken(token);
+    const user = await resolveUser(token);
+    if (!user) {
+      res.status(401).json({ error: "Invalid or expired session." });
+      return;
+    }
+    req.user = user;
     next();
-  } catch {
-    res.status(401).json({ error: "Invalid or expired session." });
+  } catch (err) {
+    // Database failure: do not fall back to trusting the token.
+    next(err);
   }
 }
 
@@ -47,25 +77,22 @@ export function requireRole(...roles: Array<"customer" | "admin" | "store_owner"
 }
 
 /**
- * Attaches req.user if a valid token is present, but never blocks the
- * request. Useful for routes whose behavior differs slightly when the
- * caller happens to be logged in (not used by auth routes themselves).
+ * Attaches req.user if a valid token for an existing account is present, but
+ * never blocks the request. If the database check fails the request simply
+ * continues anonymously (least privilege).
  */
-export function attachUserIfPresent(
+export async function attachUserIfPresent(
   req: Request,
   _res: Response,
   next: NextFunction
-): void {
-  const bearer = req.headers.authorization?.startsWith("Bearer ")
-    ? req.headers.authorization.slice(7)
-    : null;
-  const token = req.cookies?.token || bearer;
-
+): Promise<void> {
+  const token = extractToken(req);
   if (token) {
     try {
-      req.user = verifyToken(token);
+      const user = await resolveUser(token);
+      if (user) req.user = user;
     } catch {
-      // ignore invalid token in optional mode
+      // ignore in optional mode
     }
   }
   next();

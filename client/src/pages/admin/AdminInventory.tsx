@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { api, fetchAllBooks } from "../../api/client";
 
 interface Book {
   id: string;
@@ -15,10 +15,11 @@ export default function AdminInventory() {
   const [savingId, setSavingId] = useState<string | null>(null);
 
   async function load() {
-    const res = await api.get<{ books: Book[] }>("/books?limit=50&sort=title");
-    setBooks(res.books);
+    // The API returns at most 50 books per page; load every page.
+    const all = await fetchAllBooks<Book>("sort=title");
+    setBooks(all);
     const initialDrafts: Record<string, string> = {};
-    res.books.forEach((b) => (initialDrafts[b.id] = String(b.quantity)));
+    all.forEach((b) => (initialDrafts[b.id] = String(b.quantity)));
     setDrafts(initialDrafts);
   }
 

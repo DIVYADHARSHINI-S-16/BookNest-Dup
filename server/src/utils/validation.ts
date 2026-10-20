@@ -12,6 +12,56 @@ export function isValidUuid(value: unknown): boolean {
   );
 }
 
+const INT32_MAX = 2147483647;
+
+/**
+ * Parses a SERIAL (integer) database id such as categories.id. Accepts a
+ * positive whole number or a string of digits; anything else gives null.
+ */
+export function parseIntegerId(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 1 && value <= INT32_MAX ? value : null;
+  }
+  if (typeof value === "string" && /^\d{1,10}$/.test(value.trim())) {
+    const n = Number(value.trim());
+    return n >= 1 && n <= INT32_MAX ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Strict whole-number parser for quantities: accepts a non-negative integer
+ * or a string of digits. Rejects "", null, booleans, decimals, negatives,
+ * NaN and values too large for a Postgres INTEGER (returns null).
+ */
+export function parseNonNegativeInt(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 && value <= INT32_MAX ? value : null;
+  }
+  if (typeof value === "string" && /^\d{1,10}$/.test(value.trim())) {
+    const n = Number(value.trim());
+    return n <= INT32_MAX ? n : null;
+  }
+  return null;
+}
+
+/**
+ * ISBN input is optional. Hyphens and spaces are stripped; what remains must
+ * be 10 characters (digits, last may be X) or 13 digits. The checksum is not
+ * enforced so existing catalog data keeps saving. Returns the stored form.
+ */
+export function normalizeIsbn(
+  value: unknown
+): { ok: true; isbn: string | null } | { ok: false } {
+  if (value === undefined || value === null) return { ok: true, isbn: null };
+  if (typeof value !== "string") return { ok: false };
+  const trimmed = value.trim();
+  if (trimmed === "") return { ok: true, isbn: null };
+  const compact = trimmed.replace(/[-\s]/g, "").toUpperCase();
+  if (/^(\d{9}[\dX]|\d{13})$/.test(compact)) return { ok: true, isbn: compact };
+  return { ok: false };
+}
+
 export function isValidNonNegativeInteger(value: unknown): boolean {
   const num = Number(value);
   return Number.isInteger(num) && num >= 0;

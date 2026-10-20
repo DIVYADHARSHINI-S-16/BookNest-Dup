@@ -8,12 +8,17 @@ export interface CartItem {
   title: string;
   author: string;
   unitPrice: number;
+  /** What the store charges right now; differs from unitPrice if the store changed its price. */
+  currentPrice?: number;
+  priceChanged?: boolean;
   coverImageUrl: string;
   quantity: number;
   availableQuantity: number;
   exceedsStock: boolean;
   storeId?: string | null;
   storeName?: string | null;
+  /** false when the line's store has stopped accepting purchases. */
+  storeActive?: boolean;
 }
 
 export interface CartData {
@@ -21,6 +26,7 @@ export interface CartData {
   itemCount: number;
   subtotal: number;
   total: number;
+  hasPriceChanges?: boolean;
 }
 
 const emptyCart: CartData = { items: [], itemCount: 0, subtotal: 0, total: 0 };

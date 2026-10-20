@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../../api/client";
-
-const STATUSES = ["PLACED", "CONFIRMED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED"];
+import { orderStatusLabel } from "../../components/orderStatus";
 
 export default function AdminOrderDetail() {
   const { id } = useParams<{ id: string }>();
   const [order, setOrder] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function load() {
     const res = await api.get<{ order: any }>(`/orders/${id}`);
@@ -21,15 +21,16 @@ export default function AdminOrderDetail() {
   }, [id]);
 
   async function handleStatusChange(status: string) {
+    if (status === "CANCELLED" && !window.confirm("Cancel this order? Its stock will be returned to inventory.")) return;
     setUpdating(true);
-    setError(null);
+    setActionError(null);
     try {
       await api.patch(`/orders/${id}/status`, { status });
-      await load();
     } catch (err: any) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setUpdating(false);
+      await load().catch((err) => setError(err.message)); // always show the real current status
     }
   }
 
@@ -44,16 +45,18 @@ export default function AdminOrderDetail() {
       </h1>
       <p>Placed {new Date(order.createdAt).toLocaleString()}</p>
 
+      {actionError && <p className="admin-error">{actionError}</p>}
+
       <label style={{ display: "block", maxWidth: 220, marginBottom: "1.5rem" }}>
         Status
         <select
           value={order.status}
-          disabled={updating}
+          disabled={updating || order.allowedNextStatuses.length === 0}
           onChange={(e) => handleStatusChange(e.target.value)}
         >
-          {STATUSES.map((s) => (
+          {[order.status, ...order.allowedNextStatuses].map((s: string) => (
             <option key={s} value={s}>
-              {s}
+              {orderStatusLabel(s)}
             </option>
           ))}
         </select>

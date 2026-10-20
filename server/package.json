@@ -5,13 +5,18 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-sql.js",
     "start": "node dist/index.js",
     "db:migrate": "ts-node src/db/migrate.ts",
-    "db:seed": "ts-node src/db/seed.ts"
+    "db:seed": "ts-node src/db/seed.ts",
+    "test": "node --require ts-node/register/transpile-only --test --test-concurrency=1 tests/*.test.ts",
+    "db:seed:catalog": "ts-node src/db/seed.ts --catalog-only",
+    "db:migrate:prod": "node dist/db/migrate.js",
+    "demo:stores:dry-run": "ts-node scripts/seed-demo-stores.ts",
+    "demo:stores:apply": "ts-node scripts/seed-demo-stores.ts --apply"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -34,5 +39,8 @@
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

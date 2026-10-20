@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
 import { isValidUuid } from "../utils/validation";
+import { invalidateBookCaches } from "../utils/cache";
 
 /**
  * GET /api/books/:bookId/reviews
@@ -83,6 +84,9 @@ export async function addReview(req: Request, res: Response, next: NextFunction)
       [bookId, req.user!.userId, ratingNum, comment?.trim() || null]
     );
 
+    // The book list/detail responses embed averageRating and reviewCount and are cached.
+    await invalidateBookCaches(bookId);
+
     res.status(201).json({ review: result.rows[0] });
   } catch (err) {
     next(err);
@@ -125,8 +129,9 @@ export async function deleteReviewAsAdmin(req: Request, res: Response, next: Nex
   try {
     const { reviewId } = req.params;
     if (!isValidUuid(reviewId)) throw new AppError("Invalid review ID.", 400);
-    const result = await pool.query("DELETE FROM reviews WHERE id = $1 RETURNING id", [reviewId]);
+    const result = await pool.query("DELETE FROM reviews WHERE id = $1 RETURNING id, book_id", [reviewId]);
     if (result.rows.length === 0) throw new AppError("Review not found.", 404);
+    await invalidateBookCaches(result.rows[0].book_id);
     res.status(204).send();
   } catch (err) {
     next(err);

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { LoadingState, ErrorState, EmptyState } from "../components/StateBlocks";
+import { orderStatusBadge, orderStatusLabel } from "../components/orderStatus";
 
 interface Order {
   id: string;
@@ -9,15 +10,6 @@ interface Order {
   total: number;
   createdAt: string;
 }
-
-const STATUS_BADGE: Record<string, string> = {
-  PLACED: "badge",
-  CONFIRMED: "badge badge-success",
-  PACKED: "badge badge-success",
-  SHIPPED: "badge badge-success",
-  DELIVERED: "badge badge-success",
-  CANCELLED: "badge badge-danger",
-};
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[] | null>(null);
@@ -57,7 +49,7 @@ export default function OrdersPage() {
               <td>{new Date(order.createdAt).toLocaleDateString()}</td>
               <td>₹{order.total.toFixed(2)}</td>
               <td>
-                <span className={STATUS_BADGE[order.status] || "badge"}>{order.status}</span>
+                <span className={orderStatusBadge(order.status)}>{orderStatusLabel(order.status)}</span>
               </td>
               <td>
                 <Link to={`/orders/${order.id}`}>View details</Link>

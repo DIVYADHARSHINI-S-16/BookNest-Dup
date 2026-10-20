@@ -5,6 +5,7 @@ import {
   getOrderById,
   getAllOrders,
   updateOrderStatus,
+  cancelMyOrder,
 } from "../controllers/orderController";
 import { requireAuth, requireRole } from "../middleware/auth";
 
@@ -20,6 +21,7 @@ router.patch("/:id/status", requireRole("admin"), updateOrderStatus);
 // Customer routes
 router.post("/checkout", requireRole("customer"), checkout);
 router.get("/", requireRole("customer"), getMyOrders);
+router.post("/:id/cancel", requireRole("customer"), cancelMyOrder);
 router.get("/:id", getOrderById); // shared: customer (own order) or admin (any)
 
 export default router;

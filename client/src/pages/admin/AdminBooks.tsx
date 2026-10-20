@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../../api/client";
+import { api, fetchAllBooks } from "../../api/client";
 
 interface Book {
   id: string;
@@ -17,8 +17,8 @@ export default function AdminBooks() {
   const [error, setError] = useState<string | null>(null);
 
   async function loadBooks() {
-    const res = await api.get<{ books: Book[] }>("/books?limit=50&sort=title");
-    setBooks(res.books);
+    // The API returns at most 50 books per page; load every page.
+    setBooks(await fetchAllBooks<Book>("sort=title"));
   }
 
   useEffect(() => {
@@ -26,12 +26,22 @@ export default function AdminBooks() {
   }, []);
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this book permanently?")) return;
+    if (
+      !confirm(
+        "Delete this book permanently? Books that are in orders, customer carts or store listings can't be deleted."
+      )
+    )
+      return;
+    setError(null);
     try {
       await api.delete(`/books/${id}`);
       await loadBooks();
     } catch (err: any) {
-      setError(err.message);
+      // A 409 carries the server's explanation (e.g. the book is in existing orders).
+      const title = books.find((b) => b.id === id)?.title;
+      const reason = err?.message || "Unable to delete this book.";
+      setError(title ? `"${title}": ${reason}` : reason);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }
 

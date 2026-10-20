@@ -9,8 +9,19 @@ interface DashboardStats {
   totalRevenue: number;
   ordersByStatus: Record<string, number>;
   lowStockThreshold: number;
+  /** Legacy catalog inventory (shared stock table). */
   lowStockBooks: { id: string; title: string; author: string; availableQuantity: number }[];
-  availableInventory: number;
+  legacyAvailableInventory: number;
+  /** Store inventory (per-store listings), reported separately. */
+  lowStockStoreListings: {
+    bookId: string;
+    title: string;
+    author: string;
+    storeId: string;
+    storeName: string;
+    availableQuantity: number;
+  }[];
+  storeAvailableInventory: number;
   recentOrders: {
     id: string;
     status: string;
@@ -47,8 +58,10 @@ export default function AdminDashboard() {
         <StatCard label="Total Orders" value={stats.totalOrders} />
         <StatCard label="Total Reviews" value={stats.totalReviews} />
         <StatCard label="Revenue (non-cancelled)" value={`₹${stats.totalRevenue.toFixed(2)}`} />
-        <StatCard label="Low-Stock Books" value={stats.lowStockBooks.length} />
-        <StatCard label="Available Inventory" value={stats.availableInventory} />
+        <StatCard label="Low-Stock Books (catalog stock)" value={stats.lowStockBooks.length} />
+        <StatCard label="Available Copies (catalog stock)" value={stats.legacyAvailableInventory} />
+        <StatCard label="Low-Stock Store Listings" value={stats.lowStockStoreListings.length} />
+        <StatCard label="Available Copies (store stock)" value={stats.storeAvailableInventory} />
       </div>
 
       <h2 className="admin-page-title" style={{ fontSize: "1.1rem" }}>
@@ -72,12 +85,12 @@ export default function AdminDashboard() {
       </table>
 
       <h2 className="admin-page-title" style={{ fontSize: "1.1rem" }}>
-        Low Stock (≤ {stats.lowStockThreshold} copies)
+        Low Stock — Catalog Inventory (≤ {stats.lowStockThreshold} available copies)
       </h2>
       {stats.lowStockBooks.length === 0 ? (
         <p>No books are currently low on stock.</p>
       ) : (
-        <table className="admin-table" style={{ maxWidth: 600 }}>
+        <table className="admin-table" style={{ marginBottom: "2rem", maxWidth: 600 }}>
           <thead>
             <tr>
               <th>Title</th>
@@ -95,6 +108,42 @@ export default function AdminDashboard() {
                     className={"admin-badge" + (book.availableQuantity === 0 ? " low" : "")}
                   >
                     {book.availableQuantity}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h2 className="admin-page-title" style={{ fontSize: "1.1rem" }}>
+        Low Stock — Store Inventory (≤ {stats.lowStockThreshold} available copies)
+      </h2>
+      {stats.lowStockStoreListings.length === 0 ? (
+        <p>No active store listings are currently low on stock.</p>
+      ) : (
+        <table className="admin-table" style={{ marginBottom: "2rem", maxWidth: 700 }}>
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Store</th>
+              <th>Available</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stats.lowStockStoreListings.map((listing) => (
+              <tr key={`${listing.storeId}-${listing.bookId}`}>
+                <td>
+                  {listing.title}
+                  <br />
+                  <small>{listing.author}</small>
+                </td>
+                <td>{listing.storeName}</td>
+                <td>
+                  <span
+                    className={"admin-badge" + (listing.availableQuantity === 0 ? " low" : "")}
+                  >
+                    {listing.availableQuantity}
                   </span>
                 </td>
               </tr>

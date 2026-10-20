@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
 import { getCache, setCache, invalidateCategoryCaches } from "../utils/cache";
-import { isValidUuid } from "../utils/validation";
+import { parseIntegerId } from "../utils/validation";
 
 function slugify(name: string): string {
   return name
@@ -52,8 +52,8 @@ export async function createCategory(req: Request, res: Response, next: NextFunc
 
 export async function updateCategory(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
-    if (!isValidUuid(id)) throw new AppError("Invalid category ID.", 400);
+    const id = parseIntegerId(req.params.id);
+    if (id === null) throw new AppError("Invalid category ID.", 400);
     const { name, description } = req.body;
     if (!name || typeof name !== "string" || name.trim().length < 2) {
       throw new AppError("Category name is required.", 422);
@@ -74,8 +74,8 @@ export async function updateCategory(req: Request, res: Response, next: NextFunc
 
 export async function deleteCategory(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
-    if (!isValidUuid(id)) throw new AppError("Invalid category ID.", 400);
+    const id = parseIntegerId(req.params.id);
+    if (id === null) throw new AppError("Invalid category ID.", 400);
     const inUse = await pool.query("SELECT id FROM books WHERE category_id = $1 LIMIT 1", [id]);
     if (inUse.rows.length > 0) {
       throw new AppError("Cannot delete a category that still has books.", 409);

@@ -35,6 +35,7 @@ export default function CartPage() {
   }
 
   const hasStockIssue = cart.items.some((i) => i.exceedsStock);
+  const hasInactiveStore = cart.items.some((i) => i.storeActive === false);
 
   return (
     <div>
@@ -60,6 +61,17 @@ export default function CartPage() {
                 {item.storeName && (
                   <p className="badge" style={{ marginTop: "0.25rem" }}>
                     From {item.storeName}
+                  </p>
+                )}
+                {item.priceChanged && item.currentPrice !== undefined && (
+                  <p className="badge badge-danger">
+                    Price changed: ₹{item.unitPrice.toFixed(2)} → ₹{item.currentPrice.toFixed(2)}.
+                    You will be asked to confirm it at checkout.
+                  </p>
+                )}
+                {item.storeActive === false && (
+                  <p className="badge badge-danger">
+                    {item.storeName ?? "This store"} is not accepting orders right now — remove this item to check out.
                   </p>
                 )}
                 {item.exceedsStock && (
@@ -107,7 +119,7 @@ export default function CartPage() {
           </div>
           <button
             className="btn btn-block"
-            disabled={hasStockIssue}
+            disabled={hasStockIssue || hasInactiveStore}
             onClick={() => navigate("/checkout")}
           >
             Proceed to checkout
@@ -115,6 +127,11 @@ export default function CartPage() {
           {hasStockIssue && (
             <p style={{ color: "var(--color-danger)", fontSize: "0.8rem", marginTop: "0.5rem" }}>
               Resolve the stock issue above before checking out.
+            </p>
+          )}
+          {hasInactiveStore && (
+            <p style={{ color: "var(--color-danger)", fontSize: "0.8rem", marginTop: "0.5rem" }}>
+              Remove the items from stores that are not accepting orders before checking out.
             </p>
           )}
         </div>

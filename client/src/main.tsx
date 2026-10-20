@@ -28,6 +28,9 @@ import OrderSuccessPage from "./pages/OrderSuccessPage";
 import OrdersPage from "./pages/OrdersPage";
 import OrderDetailPage from "./pages/OrderDetailPage";
 import ProfilePage from "./pages/ProfilePage";
+import BookRequestsPage from "./pages/BookRequestsPage";
+import NearbyBookstoresPage from "./pages/NearbyBookstoresPage";
+import StoreBooksPage from "./pages/StoreBooksPage";
 
 // Admin pages
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -39,6 +42,7 @@ import AdminOrders from "./pages/admin/AdminOrders";
 import AdminOrderDetail from "./pages/admin/AdminOrderDetail";
 import AdminReviews from "./pages/admin/AdminReviews";
 import AdminSecondHand from "./pages/admin/AdminSecondHand";
+import AdminBookRequests from "./pages/admin/AdminBookRequests";
 import StoreOwnerPage from "./pages/StoreOwnerPage";
 
 function App() {
@@ -57,13 +61,21 @@ function App() {
                 <Route path="/help-me-choose" element={<HelpMeChoosePage />} />
                 <Route path="/books/:id" element={<BookDetailPage />} />
                 <Route path="/categories" element={<CategoriesPage />} />
+                {/* Public: nearby store discovery needs no login and no location permission */}
+                <Route path="/nearby-stores" element={<NearbyBookstoresPage />} />
+                <Route path="/nearby-stores/:storeId" element={<StoreBooksPage />} />
 
-                {/* Requires login (customer or admin) */}
-                <Route element={<RequireAuth />}>
+                {/* Customer-only pages (the server answers 403 to every other role) */}
+                <Route element={<RequireAuth roles={["customer"]} />}>
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />
                   <Route path="/order-success" element={<OrderSuccessPage />} />
                   <Route path="/orders" element={<OrdersPage />} />
+                  <Route path="/book-requests" element={<BookRequestsPage />} />
+                </Route>
+
+                {/* Any logged-in user (order detail: a customer's own order, or any order for an admin) */}
+                <Route element={<RequireAuth />}>
                   <Route path="/orders/:id" element={<OrderDetailPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
                 </Route>
@@ -86,6 +98,7 @@ function App() {
                   <Route path="orders/:id" element={<AdminOrderDetail />} />
                   <Route path="reviews" element={<AdminReviews />} />
                   <Route path="second-hand" element={<AdminSecondHand />} />
+                  <Route path="book-requests" element={<AdminBookRequests />} />
                 </Route>
               </Route>
 

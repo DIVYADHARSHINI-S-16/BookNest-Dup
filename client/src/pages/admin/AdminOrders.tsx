@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../api/client";
+import { ORDER_STATUS_LABEL, orderStatusLabel } from "../../components/orderStatus";
 
 interface Order {
   id: string;
@@ -10,9 +11,10 @@ interface Order {
   paymentStatus: string;
   createdAt: string;
   customer: { name: string; email: string };
+  allowedNextStatuses: string[];
 }
 
-const STATUSES = ["PLACED", "CONFIRMED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED"];
+const STATUSES = Object.keys(ORDER_STATUS_LABEL);
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -32,12 +34,13 @@ export default function AdminOrders() {
 
   async function updateStatus(id: string, status: string) {
     setError(null);
+    if (status === "CANCELLED" && !window.confirm("Cancel this order? Its stock will be returned to inventory.")) return;
     try {
       await api.patch(`/orders/${id}/status`, { status });
-      await load();
     } catch (err: any) {
       setError(err.message);
     }
+    await load().catch((err) => setError(err.message)); // always show the real current status
   }
 
   return (
@@ -51,7 +54,7 @@ export default function AdminOrders() {
           <option value="">All</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {orderStatusLabel(s)}
             </option>
           ))}
         </select>
@@ -85,11 +88,12 @@ export default function AdminOrders() {
               <td>
                 <select
                   value={order.status}
+                  disabled={order.allowedNextStatuses.length === 0}
                   onChange={(e) => updateStatus(order.id, e.target.value)}
                 >
-                  {STATUSES.map((s) => (
+                  {[order.status, ...order.allowedNextStatuses].map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {orderStatusLabel(s)}
                     </option>
                   ))}
                 </select>

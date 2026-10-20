@@ -16,9 +16,11 @@ export async function getDashboardStats(_req: Request, res: Response, next: Next
       totalOrdersResult,
       ordersByStatusResult,
       lowStockResult,
+      lowStockStoreResult,
       totalReviewsResult,
       revenueResult,
       availableInventoryResult,
+      storeAvailableInventoryResult,
       recentOrdersResult,
       popularBooksResult,
       categoryStatsResult,
@@ -28,20 +30,40 @@ export async function getDashboardStats(_req: Request, res: Response, next: Next
       pool.query("SELECT COUNT(*)::int AS count FROM orders"),
       pool.query("SELECT status, COUNT(*)::int AS count FROM orders GROUP BY status"),
       pool.query(
-        `SELECT b.id, b.title, b.author, COALESCE(i.quantity - i.reserved, 0) AS available_quantity
+        `SELECT b.id, b.title, b.author, GREATEST(COALESCE(i.quantity - i.reserved, 0), 0) AS available_quantity
          FROM books b LEFT JOIN inventory i ON i.book_id = b.id
-         WHERE COALESCE(i.quantity - i.reserved, 0) <= $1
-         ORDER BY available_quantity ASC`,
+         WHERE GREATEST(COALESCE(i.quantity - i.reserved, 0), 0) <= $1
+         ORDER BY available_quantity ASC, b.title ASC`,
+        [LOW_STOCK_THRESHOLD]
+      ),
+      // Store stock, reported separately: one row per sellable store listing
+      // (active listing in an active store) whose available copies are low.
+      pool.query(
+        `SELECT b.id AS book_id, b.title, b.author, s.id AS store_id, s.name AS store_name,
+                GREATEST(sbi.quantity - sbi.reserved, 0) AS available_quantity
+         FROM store_book_inventory sbi
+         JOIN books b ON b.id = sbi.book_id
+         JOIN stores s ON s.id = sbi.store_id
+         WHERE sbi.is_active = true AND s.is_active = true
+           AND GREATEST(sbi.quantity - sbi.reserved, 0) <= $1
+         ORDER BY available_quantity ASC, b.title ASC, s.name ASC`,
         [LOW_STOCK_THRESHOLD]
       ),
       pool.query("SELECT COUNT(*)::int AS count FROM reviews"),
       pool.query(
         `SELECT COALESCE(SUM(total), 0) AS revenue FROM orders WHERE status != 'CANCELLED'`
       ),
-      // Total copies currently sellable across the whole catalog (quantity minus cart reservations).
+      // Legacy (catalog-wide) stock currently sellable: quantity minus cart reservations.
       pool.query(
         `SELECT COALESCE(SUM(GREATEST(i.quantity - i.reserved, 0)), 0)::int AS available
          FROM inventory i`
+      ),
+      // Store stock currently sellable: active listings in active stores only.
+      pool.query(
+        `SELECT COALESCE(SUM(GREATEST(sbi.quantity - sbi.reserved, 0)), 0)::int AS available
+         FROM store_book_inventory sbi
+         JOIN stores s ON s.id = sbi.store_id
+         WHERE sbi.is_active = true AND s.is_active = true`
       ),
       // Last 5 orders with the customer's name/email, newest first.
       pool.query(
@@ -86,13 +108,24 @@ export async function getDashboardStats(_req: Request, res: Response, next: Next
       totalRevenue: Number(revenueResult.rows[0].revenue),
       ordersByStatus,
       lowStockThreshold: LOW_STOCK_THRESHOLD,
+      // Legacy catalog inventory (the shared `inventory` table).
       lowStockBooks: lowStockResult.rows.map((row) => ({
         id: row.id,
         title: row.title,
         author: row.author,
         availableQuantity: Number(row.available_quantity) || 0,
       })),
-      availableInventory: availableInventoryResult.rows[0].available,
+      legacyAvailableInventory: availableInventoryResult.rows[0].available,
+      // Store inventory (store_book_inventory), reported separately.
+      lowStockStoreListings: lowStockStoreResult.rows.map((row) => ({
+        bookId: row.book_id,
+        title: row.title,
+        author: row.author,
+        storeId: row.store_id,
+        storeName: row.store_name,
+        availableQuantity: Number(row.available_quantity) || 0,
+      })),
+      storeAvailableInventory: storeAvailableInventoryResult.rows[0].available,
       recentOrders: recentOrdersResult.rows.map((row) => ({
         id: row.id,
         status: row.status,

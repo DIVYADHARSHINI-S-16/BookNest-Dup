@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../api/client";
+import { api, fetchAllBooks } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import { LoadingState, EmptyState, ErrorState } from "./StateBlocks";
 
@@ -60,9 +60,9 @@ export default function StoreInventoryPanel() {
 
   useEffect(() => {
     loadInventory();
-    api
-      .get<{ books: BookOption[] }>("/books?limit=100&sort=title")
-      .then((res) => setBooks(res.books))
+    // The API returns at most 50 books per page; load every page for the picker.
+    fetchAllBooks<BookOption>("sort=title")
+      .then((all) => setBooks(all))
       .catch(() => setBooks([]));
   }, []);
 

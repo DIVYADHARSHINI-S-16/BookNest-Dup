@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useToast } from "../context/ToastContext";
+import { orderStatusBadge, orderStatusLabel } from "../components/orderStatus";
 import { LoadingState, ErrorState } from "../components/StateBlocks";
 
 interface OrderItem {
@@ -24,6 +26,7 @@ interface OrderDetail {
   paymentMethod: string;
   paymentStatus: string;
   createdAt: string;
+  canCancel?: boolean;
   items: OrderItem[];
 }
 
@@ -31,14 +34,32 @@ export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const { showToast } = useToast();
+
+  const load = useCallback(async () => {
+    if (!id) return;
+    const res = await api.get<{ order: OrderDetail }>(`/orders/${id}`);
+    setOrder(res.order);
+  }, [id]);
 
   useEffect(() => {
-    if (!id) return;
-    api
-      .get<{ order: OrderDetail }>(`/orders/${id}`)
-      .then((res) => setOrder(res.order))
-      .catch((err) => setError(err.message));
-  }, [id]);
+    load().catch((err) => setError(err.message));
+  }, [load]);
+
+  async function handleCancel() {
+    if (!window.confirm("Cancel this order? The books will be returned to stock.")) return;
+    setCancelling(true);
+    try {
+      await api.post(`/orders/${id}/cancel`);
+      showToast("Order cancelled.", "success");
+    } catch (err: any) {
+      showToast(err.message, "error"); // e.g. it was packed in the meantime
+    } finally {
+      setCancelling(false);
+      await load().catch(() => undefined); // always show the order's real current status
+    }
+  }
 
   if (error) return <ErrorState message={error} />;
   if (!order) return <LoadingState label="Loading order…" />;
@@ -48,8 +69,13 @@ export default function OrderDetailPage() {
       <h1 className="page-title">Order #{order.id.slice(0, 8)}</h1>
       <p className="page-subtitle">
         Placed {new Date(order.createdAt).toLocaleString()} · Status:{" "}
-        <span className="badge">{order.status}</span>
+        <span className={orderStatusBadge(order.status)}>{orderStatusLabel(order.status)}</span>
       </p>
+      {order.canCancel && (
+        <button className="btn btn-outline btn-sm" style={{ marginBottom: "1rem" }} disabled={cancelling} onClick={handleCancel}>
+          {cancelling ? "Cancelling…" : "Cancel order"}
+        </button>
+      )}
 
       <div className="cart-layout">
         <div>

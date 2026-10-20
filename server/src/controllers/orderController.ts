@@ -2,9 +2,15 @@ import { Request, Response, NextFunction } from "express";
 import { pool } from "../db/pool";
 import { AppError } from "../middleware/errorHandler";
 import { isValidUuid } from "../utils/validation";
-import { getOrCreateCartId } from "./cartController";
-
-const ORDER_STATUSES = ["PLACED", "CONFIRMED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED"];
+import { getOrCreateCartId, lockCartRow } from "./cartController";
+import { invalidateAvailabilityCaches } from "../utils/cache";
+import {
+  ORDER_STATUSES,
+  allowedNextStatuses,
+  canCancelStatus,
+  cancelOrderInTransaction,
+  isOrderStatus,
+} from "../utils/orderLifecycle";
 
 /**
  * MOCK PAYMENT
@@ -28,37 +34,90 @@ function formatOrderSummary(row: any) {
     paymentStatus: row.payment_status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    cancelledAt: row.cancelled_at ?? null,
+    canCancel: canCancelStatus(row.status),
   };
+}
+
+interface PriceChange {
+  bookId: string;
+  title: string;
+  storeId: string;
+  storeName: string | null;
+  quantity: number;
+  previousPrice: number;
+  currentPrice: number;
+}
+
+/** Thrown inside the checkout transaction to roll it back and ask the customer to re-confirm. */
+class PriceChangedError extends Error {
+  constructor(public priceChanges: PriceChange[], public previousTotal: number, public newTotal: number) {
+    super("Some prices have changed since you added these items to your cart.");
+  }
+}
+
+const toCents = (amount: number) => Math.round(amount * 100);
+
+/**
+ * Validates the optional `confirmedPrices` checkout field: the exact prices
+ * the customer reviewed and agreed to after a PRICE_CHANGED response.
+ */
+function parseConfirmedPrices(raw: unknown): { bookId: string; storeId: string; unitPrice: number }[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new AppError("confirmedPrices must be a list.", 422);
+  return raw.map((entry) => {
+    const { bookId, storeId, unitPrice } = (entry || {}) as Record<string, unknown>;
+    if (!isValidUuid(bookId) || !isValidUuid(storeId) || typeof unitPrice !== "number" || !Number.isFinite(unitPrice)) {
+      throw new AppError("Each confirmed price needs a bookId, storeId and numeric unitPrice.", 422);
+    }
+    return { bookId: bookId as string, storeId: storeId as string, unitPrice };
+  });
 }
 
 /**
  * POST /api/orders/checkout
- * body: { shippingAddress: string }
+ * body: { shippingAddress: string, confirmedPrices?: [{ bookId, storeId, unitPrice }] }
  *
- * Locks each book's inventory row, re-validates stock against the current
- * cart, creates the order + order_items, decrements inventory, and clears
- * the cart — all inside a single transaction so nothing can end up
+ * Locks the cart and each book's stock row, re-validates stock against the
+ * current cart, creates the order + order_items, decrements stock, and
+ * clears the cart — all inside a single transaction so nothing can end up
  * half-applied.
+ *
+ * Price safety: a store line remembers the price the customer was shown when
+ * they added it. If the store's price has changed since, checkout refuses
+ * with 409 { code: "PRICE_CHANGED", priceChanges, newTotal } and changes
+ * nothing. The customer reviews the new prices and calls checkout again,
+ * passing those prices back in `confirmedPrices`. Carts whose prices have
+ * not changed need no extra field, so the normal flow is unchanged.
  */
 export async function checkout(req: Request, res: Response, next: NextFunction) {
   const client = await pool.connect();
+  let committed = false;
   try {
     const { shippingAddress } = req.body;
     if (!shippingAddress || typeof shippingAddress !== "string" || shippingAddress.trim().length < 5) {
       throw new AppError("A valid shipping address is required.", 422);
     }
 
+    const confirmedPrices = parseConfirmedPrices(req.body.confirmedPrices);
+
     const userId = req.user!.userId;
-    const cartId = await getOrCreateCartId(userId);
 
     await client.query("BEGIN");
+    const cartId = await getOrCreateCartId(userId, client);
 
-    // Lock the cart's rows against concurrent checkout attempts by the same user.
+    // Lock the cart against concurrent cart changes / checkout attempts by
+    // the same user (a duplicate click waits here, then finds an empty cart).
+    await lockCartRow(client, cartId);
+
+    // Sorted by book so every checkout locks stock rows in the same order
+    // and two carts can never deadlock on each other.
     const cartItemsResult = await client.query(
       `SELECT ci.id, ci.book_id, ci.quantity, ci.store_id, ci.store_price, b.title, b.price
        FROM cart_items ci
        JOIN books b ON b.id = ci.book_id
        WHERE ci.cart_id = $1
+       ORDER BY ci.book_id
        FOR UPDATE OF ci`,
       [cartId]
     );
@@ -68,6 +127,8 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
     }
 
     let subtotal = 0;
+    let previousTotal = 0;
+    const unconfirmedChanges: PriceChange[] = [];
     const lineItems: {
       bookId: string;
       quantity: number;
@@ -82,13 +143,24 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
         // it was added to the cart (owner deactivated it, lowered quantity,
         // or someone else's checkout raced ahead of this one).
         const listingResult = await client.query(
-          `SELECT id, price, quantity, reserved, is_active FROM store_book_inventory
-           WHERE store_id = $1 AND book_id = $2 FOR UPDATE`,
+          `SELECT sbi.id, sbi.price, sbi.quantity, sbi.reserved, sbi.is_active,
+                  s.name AS store_name, s.is_active AS store_is_active
+           FROM store_book_inventory sbi
+           JOIN stores s ON s.id = sbi.store_id
+           WHERE sbi.store_id = $1 AND sbi.book_id = $2 FOR UPDATE OF sbi`,
           [item.store_id, item.book_id]
         );
         const listing = listingResult.rows[0];
         if (!listing || !listing.is_active) {
           throw new AppError(`"${item.title}" is no longer available from that store.`, 409);
+        }
+        // An inactive store accepts no new purchases. Existing orders and
+        // inventory rows are untouched; the customer just has to remove the line.
+        if (!listing.store_is_active) {
+          throw new AppError(
+            `${listing.store_name} is not currently accepting orders. Remove "${item.title}" from your cart or choose another source.`,
+            409
+          );
         }
         if (listing.quantity < item.quantity) {
           throw new AppError(
@@ -97,23 +169,60 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
           );
         }
 
-        subtotal += Number(listing.price) * item.quantity;
+        // Price check: compare today's store price with the one the
+        // customer saw in their cart. A change needs explicit confirmation.
+        const shownPrice = Number(item.store_price);
+        const currentPrice = Number(listing.price);
+        previousTotal += shownPrice * item.quantity;
+        if (toCents(shownPrice) !== toCents(currentPrice)) {
+          const confirmed = confirmedPrices.some(
+            (c) =>
+              c.bookId === item.book_id &&
+              c.storeId === item.store_id &&
+              toCents(c.unitPrice) === toCents(currentPrice)
+          );
+          if (!confirmed) {
+            unconfirmedChanges.push({
+              bookId: item.book_id,
+              title: item.title,
+              storeId: item.store_id,
+              storeName: listing.store_name,
+              quantity: item.quantity,
+              previousPrice: shownPrice,
+              currentPrice,
+            });
+          }
+        }
+
+        subtotal += currentPrice * item.quantity;
         lineItems.push({
           bookId: item.book_id,
           quantity: item.quantity,
-          unitPrice: Number(listing.price),
+          unitPrice: currentPrice,
           storeId: item.store_id,
         });
       } else {
-        // Catalog line: stock for this exact quantity was already reserved
-        // (inventory.reserved) the moment it was added to the cart, so there
-        // is no separate over-stock check to do here — we just lock the row
-        // before writing to it so two simultaneous checkouts can't race.
-        await client.query("SELECT quantity, reserved FROM inventory WHERE book_id = $1 FOR UPDATE", [
-          item.book_id,
-        ]);
+        // Catalog line: stock for this exact quantity was reserved
+        // (inventory.reserved) when it was added to the cart. We still lock
+        // the row and confirm the real quantity covers the line, so legacy
+        // stock that has since fallen short (e.g. data edited before the
+        // reserved-stock guard existed) gives a clear 409 instead of a
+        // database check-constraint error.
+        const stockResult = await client.query(
+          "SELECT quantity, reserved FROM inventory WHERE book_id = $1 FOR UPDATE",
+          [item.book_id]
+        );
+        const stock = stockResult.rows[0];
+        if (!stock || stock.quantity < item.quantity) {
+          const have = stock ? stock.quantity : 0;
+          throw new AppError(
+            `Only ${have} cop${have === 1 ? "y" : "ies"} of "${item.title}" ${have === 1 ? "is" : "are"} in stock now. Please reduce the quantity in your cart.`,
+            409
+          );
+        }
 
         subtotal += Number(item.price) * item.quantity;
+        previousTotal += Number(item.price) * item.quantity;
         lineItems.push({
           bookId: item.book_id,
           quantity: item.quantity,
@@ -121,6 +230,15 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
           storeId: null,
         });
       }
+    }
+
+    if (unconfirmedChanges.length > 0) {
+      // Nothing has been written yet; the catch block rolls back and replies 409.
+      throw new PriceChangedError(
+        unconfirmedChanges,
+        Number(previousTotal.toFixed(2)),
+        Number(subtotal.toFixed(2))
+      );
     }
 
     const total = subtotal; // no tax/shipping fee in Phase 1
@@ -170,13 +288,27 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
     await client.query("DELETE FROM cart_items WHERE cart_id = $1", [cartId]);
 
     await client.query("COMMIT");
+    committed = true;
+
+    await invalidateAvailabilityCaches(lineItems.map((line) => line.bookId));
 
     res.status(201).json({
       message: "Order placed successfully (mock payment).",
       order: formatOrderSummary(order),
     });
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (!committed) await client.query("ROLLBACK").catch(() => undefined);
+    if (err instanceof PriceChangedError) {
+      res.status(409).json({
+        error: err.message,
+        code: "PRICE_CHANGED",
+        message: "Please review the updated prices and confirm to place your order.",
+        priceChanges: err.priceChanges,
+        previousTotal: err.previousTotal,
+        newTotal: err.newTotal,
+      });
+      return;
+    }
     next(err);
   } finally {
     client.release();
@@ -187,7 +319,7 @@ export async function checkout(req: Request, res: Response, next: NextFunction) 
 export async function getMyOrders(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await pool.query(
-      `SELECT id, status, subtotal, total, shipping_address, payment_method, payment_status, created_at, updated_at
+      `SELECT id, status, subtotal, total, shipping_address, payment_method, payment_status, created_at, updated_at, cancelled_at
        FROM orders WHERE user_id = $1 ORDER BY created_at DESC`,
       [req.user!.userId]
     );
@@ -199,7 +331,7 @@ export async function getMyOrders(req: Request, res: Response, next: NextFunctio
 
 async function fetchOrderWithItems(orderId: string) {
   const orderResult = await pool.query(
-    `SELECT id, user_id, status, subtotal, total, shipping_address, payment_method, payment_status, created_at, updated_at
+    `SELECT id, user_id, status, subtotal, total, shipping_address, payment_method, payment_status, created_at, updated_at, cancelled_at
      FROM orders WHERE id = $1`,
     [orderId]
   );
@@ -246,7 +378,9 @@ export async function getOrderById(req: Request, res: Response, next: NextFuncti
       throw new AppError("You do not have access to this order.", 403);
     }
 
-    res.json({ order });
+    res.json({
+      order: req.user!.role === "admin" ? { ...order, allowedNextStatuses: allowedNextStatuses(order.status) } : order,
+    });
   } catch (err) {
     next(err);
   }
@@ -260,6 +394,7 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
     const values: any[] = [];
 
     if (status) {
+      if (!isOrderStatus(status)) throw new AppError(`status must be one of: ${ORDER_STATUSES.join(", ")}`, 400);
       values.push(status);
       conditions.push(`status = $${values.length}`);
     }
@@ -267,7 +402,7 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
     const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await pool.query(
       `SELECT o.id, o.status, o.subtotal, o.total, o.shipping_address,
-              o.payment_method, o.payment_status, o.created_at, o.updated_at,
+              o.payment_method, o.payment_status, o.created_at, o.updated_at, o.cancelled_at,
               u.name AS customer_name, u.email AS customer_email
        FROM orders o
        JOIN users u ON u.id = o.user_id
@@ -279,6 +414,7 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
     res.json({
       orders: result.rows.map((row) => ({
         ...formatOrderSummary(row),
+        allowedNextStatuses: allowedNextStatuses(row.status),
         customer: { name: row.customer_name, email: row.customer_email },
       })),
     });
@@ -287,24 +423,89 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
   }
 }
 
-/** PATCH /api/orders/:id/status — admin updates order status */
+const ORDER_RETURNING =
+  "id, status, subtotal, total, shipping_address, payment_method, payment_status, created_at, updated_at, cancelled_at";
+
+/**
+ * Locks the order row, applies `apply` inside one transaction and commits. Used by both
+ * cancellation entry points so they share one code path. `apply` runs with the order locked
+ * and returns the book ids whose availability changed (for cache invalidation).
+ */
+async function withLockedOrder(
+  orderId: string,
+  apply: (client: any, order: any) => Promise<{ bookIds: string[]; unrestoredLines: number }>
+) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query("SELECT id, user_id, status FROM orders WHERE id = $1 FOR UPDATE", [orderId]);
+    if (locked.rows.length === 0) throw new AppError("Order not found.", 404);
+    const result = await apply(client, locked.rows[0]);
+    const fresh = await client.query(`SELECT ${ORDER_RETURNING} FROM orders WHERE id = $1`, [orderId]);
+    await client.query("COMMIT");
+    return { order: fresh.rows[0], ...result };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * POST /api/orders/:id/cancel — a customer cancels their own order.
+ * 400 bad id, 403 someone else's order, 404 unknown, 409 not cancellable (already cancelled
+ * or already packed/shipped/delivered). Repeating or racing the request restores stock once.
+ */
+export async function cancelMyOrder(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    if (!isValidUuid(id)) throw new AppError("Invalid order ID.", 400);
+    const out = await withLockedOrder(id, async (client, order) => {
+      if (order.user_id !== req.user!.userId) throw new AppError("You do not have access to this order.", 403);
+      if (!canCancelStatus(order.status)) {
+        throw new AppError(
+          order.status === "CANCELLED"
+            ? "This order has already been cancelled."
+            : `An order that is ${order.status} can no longer be cancelled.`,
+          409
+        );
+      }
+      return cancelOrderInTransaction(client, id);
+    });
+    await invalidateAvailabilityCaches(out.bookIds);
+    res.json({ message: "Order cancelled and stock restored.", order: formatOrderSummary(out.order), unrestoredLines: out.unrestoredLines });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /api/orders/:id/status — administrator moves an order along ORDER_TRANSITIONS.
+ * Setting CANCELLED runs the same transactional cancel + stock restoration as the customer endpoint.
+ */
 export async function updateOrderStatus(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-
-    if (!ORDER_STATUSES.includes(status)) {
+    const { status } = req.body ?? {};
+    if (!isValidUuid(id)) throw new AppError("Invalid order ID.", 400);
+    if (!isOrderStatus(status)) {
       throw new AppError(`status must be one of: ${ORDER_STATUSES.join(", ")}`, 422);
     }
 
-    const result = await pool.query(
-      `UPDATE orders SET status = $1, updated_at = now() WHERE id = $2
-       RETURNING id, status, subtotal, total, shipping_address, payment_method, payment_status, created_at, updated_at`,
-      [status, id]
-    );
-    if (result.rows.length === 0) throw new AppError("Order not found.", 404);
-
-    res.json({ order: formatOrderSummary(result.rows[0]) });
+    const out = await withLockedOrder(id, async (client, order) => {
+      if (!allowedNextStatuses(order.status).includes(status)) {
+        throw new AppError(`Cannot change an order from ${order.status} to ${status}.`, 409);
+      }
+      if (status === "CANCELLED") return cancelOrderInTransaction(client, id);
+      await client.query("UPDATE orders SET status = $2, updated_at = now() WHERE id = $1", [id, status]);
+      return { bookIds: [] as string[], unrestoredLines: 0 };
+    });
+    if (out.bookIds.length > 0) await invalidateAvailabilityCaches(out.bookIds);
+    res.json({
+      order: { ...formatOrderSummary(out.order), allowedNextStatuses: allowedNextStatuses(out.order.status) },
+      unrestoredLines: out.unrestoredLines,
+    });
   } catch (err) {
     next(err);
   }
