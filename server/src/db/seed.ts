@@ -5,11 +5,25 @@ import { hashPassword } from "../utils/password";
 
 async function seedDemoAccounts() {
   const accounts = [
-    { name: "Demo Customer", email: "customer@booknest.com", password: "Customer@123", role: "customer" },
-    { name: "Demo Admin", email: "admin@booknest.com", password: "Admin@123", role: "admin" },
+    {
+      name: "Demo Customer",
+      email: "customer@booknest.com",
+      password: process.env.DEMO_CUSTOMER_PASSWORD,
+      role: "customer",
+    },
+    {
+      name: "Demo Admin",
+      email: "admin@booknest.com",
+      password: process.env.DEMO_ADMIN_PASSWORD,
+      role: "admin",
+    },
   ];
 
   for (const acc of accounts) {
+    if (!acc.password) {
+      throw new Error(`Missing password configuration for ${acc.email}.`);
+    }
+
     const passwordHash = await hashPassword(acc.password);
     await pool.query(
       `INSERT INTO users (name, email, password_hash, role)
@@ -18,13 +32,14 @@ async function seedDemoAccounts() {
       [acc.name, acc.email, passwordHash, acc.role]
     );
   }
-  console.log("Demo accounts seeded: customer@booknest.com / admin@booknest.com");
+
+  console.log("Demo accounts seeded.");
 }
 
 
 // Demo bookstores so every book is available at several stores.
 // One store per owner (DB constraint), so each store gets its own owner account.
-const STORE_OWNER_PASSWORD = "StoreOwner@123";
+const STORE_OWNER_PASSWORD = process.env.DEMO_OWNER_PASSWORD;
 const DEMO_STORES = [
   { owner: "Savitha Raman", email: "savitha@booknest.com", name: "Savitha's Book Corner", slug: "savitha-book-corner", city: "Chennai", state: "Tamil Nadu", postal: "600020", address: "12 Besant Nagar Main Rd", phone: "+91 44 5550 0101", lat: 13.0002, lng: 80.2668 },
   { owner: "Ravi Kumar", email: "ravi@booknest.com", name: "Ravi's Book Corner", slug: "ravi-book-corner", city: "Bengaluru", state: "Karnataka", postal: "560001", address: "45 Church Street", phone: "+91 80 5550 0102", lat: 12.9753, lng: 77.6067 },
@@ -44,6 +59,9 @@ const DEMO_STORES = [
 ];
 
 async function seedDemoStores() {
+  if (!STORE_OWNER_PASSWORD) {
+    throw new Error("Missing DEMO_OWNER_PASSWORD configuration.");
+  }
   const passwordHash = await hashPassword(STORE_OWNER_PASSWORD);
   for (const s of DEMO_STORES) {
     const user = await pool.query(
@@ -87,7 +105,9 @@ async function seedDemoStores() {
      ON CONFLICT (store_id, book_id) DO NOTHING`,
     [DEMO_STORES.map((s) => s.slug)]
   );
-  console.log(`Demo stores seeded (${DEMO_STORES.length} stores, ${result.rowCount} new listings). Store owners: <name>@booknest.com / ${STORE_OWNER_PASSWORD}`);
+  console.log(
+  `Demo stores seeded (${DEMO_STORES.length} stores, ${result.rowCount} new listings).`
+);
 }
 
 // Run in order: base data, extra books, then cover/price fixes.
